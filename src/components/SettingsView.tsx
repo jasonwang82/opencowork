@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { X, Settings, FolderOpen, Server, Check, Plus, Trash2, Edit2, Zap, Eye } from 'lucide-react';
 import { SkillEditor } from './SkillEditor';
+import { useI18n } from '../i18n/useI18n';
 
 interface SettingsViewProps {
     onClose: () => void;
@@ -30,6 +31,7 @@ interface ToolPermission {
 }
 
 export function SettingsView({ onClose }: SettingsViewProps) {
+    const { t } = useI18n();
     const [config, setConfig] = useState<Config>({
         apiKey: '',
         apiUrl: 'https://api.minimaxi.com/anthropic',
@@ -219,19 +221,19 @@ export function SettingsView({ onClose }: SettingsViewProps) {
                         {activeTab === 'api' && (
                             <>
                                 <div>
-                                    <label className="block text-xs font-medium text-stone-500 mb-1.5">接入方式</label>
+                                    <label className="block text-xs font-medium text-stone-500 mb-1.5">{t('integrationMode')}</label>
                                     <select
                                         value={config.integrationMode}
                                         onChange={(e) => setConfig({ ...config, integrationMode: e.target.value as 'api' | 'cli-codebuddy' })}
                                         className="w-full bg-white border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500"
                                     >
-                                        <option value="api">API 模式 (Claude API)</option>
-                                        <option value="cli-codebuddy">CLI 模式 (CodeBuddy)</option>
+                                        <option value="api">{t('apiMode')}</option>
+                                        <option value="cli-codebuddy">{t('cliMode')}</option>
                                     </select>
                                     <p className="text-xs text-stone-400 mt-1">
                                         {config.integrationMode === 'api' 
-                                            ? '使用 API 直接调用 AI 模型' 
-                                            : '使用 CodeBuddy CLI 工具运行（需要先安装 codebuddy 命令）'}
+                                            ? t('apiModeDescription')
+                                            : t('cliModeDescription')}
                                     </p>
                                 </div>
                                 {config.integrationMode === 'api' && (
@@ -271,12 +273,12 @@ export function SettingsView({ onClose }: SettingsViewProps) {
                                 )}
                                 {config.integrationMode === 'cli-codebuddy' && (
                                     <div className="bg-amber-50 text-amber-700 rounded-lg p-3 text-xs space-y-2">
-                                        <p className="font-medium">CodeBuddy CLI 模式说明：</p>
+                                        <p className="font-medium">{t('codeBuddyInstructions')}</p>
                                         <ul className="list-disc list-inside space-y-1">
-                                            <li>需要在系统中安装 <code className="bg-amber-100 px-1 rounded">codebuddy</code> 命令</li>
-                                            <li>执行 <code className="bg-amber-100 px-1 rounded">codebuddy --help</code> 查看可用参数</li>
-                                            <li>CodeBuddy 的参数与 Claude Code 基本一致</li>
-                                            <li>API Key 和模型配置可以通过环境变量传递给 codebuddy</li>
+                                            <li>{t('codeBuddyInstallRequired')}</li>
+                                            <li>{t('codeBuddyHelp')}</li>
+                                            <li>{t('codeBuddyCompatible')}</li>
+                                            <li>{t('codeBuddyEnvVars')}</li>
                                         </ul>
                                     </div>
                                 )}

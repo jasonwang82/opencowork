@@ -139,12 +139,20 @@ export class CLIAgentRuntime {
         // Add the user message
         args.push('--message', userMessage);
 
-        console.log(`[CLIAgentRuntime] Executing: codebuddy ${args.map(a => a.includes(' ') ? `"${a}"` : a).join(' ')}`);
+        // Redact API key for logging
+        const logArgs = args.map((arg, idx) => {
+            if (args[idx - 1] === '--api-key') {
+                return '***REDACTED***';
+            }
+            return arg.includes(' ') ? `"${arg}"` : arg;
+        });
+
+        console.log(`[CLIAgentRuntime] Executing: codebuddy ${logArgs.join(' ')}`);
 
         return new Promise<void>((resolve, reject) => {
             this.currentProcess = spawn('codebuddy', args, {
                 cwd: workingDir,
-                shell: true,
+                shell: false, // Use shell: false for better security
                 env: {
                     ...process.env,
                     CODEBUDDY_API_KEY: apiKey || process.env.ANTHROPIC_API_KEY || '',
