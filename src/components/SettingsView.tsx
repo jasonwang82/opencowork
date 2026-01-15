@@ -259,7 +259,7 @@ export function SettingsView({ onClose }: SettingsViewProps) {
                                             />
                                         </div>
                                         <div>
-                                            <label className="block text-xs font-medium text-stone-500 mb-1.5">模型名称</label>
+                                            <label className="block text-xs font-medium text-stone-500 mb-1.5">{t('modelName')}</label>
                                             <input
                                                 type="text"
                                                 value={config.model}
@@ -267,7 +267,7 @@ export function SettingsView({ onClose }: SettingsViewProps) {
                                                 placeholder="glm-4.7"
                                                 className="w-full bg-white border border-stone-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500"
                                             />
-                                            <p className="text-xs text-stone-400 mt-1">输入模型名称，如 MiniMax-M2.1</p>
+                                            <p className="text-xs text-stone-400 mt-1">{t('modelNameDescription')}</p>
                                         </div>
                                     </>
                                 )}

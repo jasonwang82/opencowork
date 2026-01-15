@@ -37,7 +37,7 @@ export class CLIAgentRuntime {
         console.log('Initializing CLIAgentRuntime (CodeBuddy)...');
         // Check if codebuddy is available
         try {
-            const testProcess = spawn('codebuddy', ['--version'], { shell: true });
+            const testProcess = spawn('codebuddy', ['--version'], { shell: false });
             testProcess.on('error', (err) => {
                 console.error('CodeBuddy CLI not found:', err);
                 this.broadcast('agent:error', 'CodeBuddy CLI is not installed or not in PATH. Please install it first.');

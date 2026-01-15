@@ -71,6 +71,8 @@ export const translations = {
         codeBuddyHelp: 'Run codebuddy --help to see available parameters',
         codeBuddyCompatible: 'CodeBuddy parameters are mostly compatible with Claude Code',
         codeBuddyEnvVars: 'API Key and model configuration can be passed via environment variables to codebuddy',
+        modelName: 'Model Name',
+        modelNameDescription: 'Enter model name, e.g., MiniMax-M2.1',
 
         // Additional UI
         runningCommand: 'Running command',
@@ -154,6 +156,8 @@ export const translations = {
         codeBuddyHelp: '执行 codebuddy --help 查看可用参数',
         codeBuddyCompatible: 'CodeBuddy 的参数与 Claude Code 基本一致',
         codeBuddyEnvVars: 'API Key 和模型配置可以通过环境变量传递给 codebuddy',
+        modelName: '模型名称',
+        modelNameDescription: '输入模型名称，如 MiniMax-M2.1',
 
         // Additional UI
         runningCommand: '正在执行命令',
