@@ -193,7 +193,6 @@ export class CLIAgentRuntime {
                 stdoutBuffer += text;
                 
                 // Stream output token by token to UI
-                // The UI will accumulate these tokens in a streaming display
                 this.broadcast('agent:stream-token', text);
                 console.log('[CodeBuddy]:', text);
             });
