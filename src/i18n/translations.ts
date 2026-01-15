@@ -59,6 +59,18 @@ export const translations = {
         modelHaiku: 'Claude 3.5 Haiku (Fast)',
         modelOpus: 'Claude 3 Opus (Most Capable)',
         modelGLM4: 'GLM 4.7 (Custom)',
+        
+        // Integration Mode
+        integrationMode: 'Integration Mode',
+        apiMode: 'API Mode (Claude API)',
+        cliMode: 'CLI Mode (CodeBuddy)',
+        apiModeDescription: 'Use API to call AI models directly',
+        cliModeDescription: 'Use CodeBuddy CLI tool (requires codebuddy command to be installed)',
+        codeBuddyInstructions: 'CodeBuddy CLI Mode Instructions:',
+        codeBuddyInstallRequired: 'Requires codebuddy command to be installed on your system',
+        codeBuddyHelp: 'Run codebuddy --help to see available parameters',
+        codeBuddyCompatible: 'CodeBuddy parameters are mostly compatible with Claude Code',
+        codeBuddyEnvVars: 'API Key and model configuration can be passed via environment variables to codebuddy',
 
         // Additional UI
         runningCommand: 'Running command',
@@ -130,6 +142,18 @@ export const translations = {
         modelHaiku: 'Claude 3.5 Haiku (快速)',
         modelOpus: 'Claude 3 Opus (最强)',
         modelGLM4: 'GLM 4.7 (自定义)',
+        
+        // Integration Mode
+        integrationMode: '接入方式',
+        apiMode: 'API 模式 (Claude API)',
+        cliMode: 'CLI 模式 (CodeBuddy)',
+        apiModeDescription: '使用 API 直接调用 AI 模型',
+        cliModeDescription: '使用 CodeBuddy CLI 工具运行（需要先安装 codebuddy 命令）',
+        codeBuddyInstructions: 'CodeBuddy CLI 模式说明：',
+        codeBuddyInstallRequired: '需要在系统中安装 codebuddy 命令',
+        codeBuddyHelp: '执行 codebuddy --help 查看可用参数',
+        codeBuddyCompatible: 'CodeBuddy 的参数与 Claude Code 基本一致',
+        codeBuddyEnvVars: 'API Key 和模型配置可以通过环境变量传递给 codebuddy',
 
         // Additional UI
         runningCommand: '正在执行命令',

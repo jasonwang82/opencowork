@@ -13,6 +13,7 @@ interface Config {
     authorizedFolders: string[];
     networkAccess: boolean;
     shortcut: string;
+    integrationMode: 'api' | 'cli-codebuddy';
 }
 
 interface SkillInfo {
@@ -35,7 +36,8 @@ export function SettingsView({ onClose }: SettingsViewProps) {
         model: 'MiniMax-M2.1',
         authorizedFolders: [],
         networkAccess: false,
-        shortcut: 'Alt+Space'
+        shortcut: 'Alt+Space',
+        integrationMode: 'api'
     });
     const [saved, setSaved] = useState(false);
     const [activeTab, setActiveTab] = useState<'api' | 'folders' | 'mcp' | 'skills' | 'advanced'>('api');
@@ -217,36 +219,67 @@ export function SettingsView({ onClose }: SettingsViewProps) {
                         {activeTab === 'api' && (
                             <>
                                 <div>
-                                    <label className="block text-xs font-medium text-stone-500 mb-1.5">API Key</label>
-                                    <input
-                                        type="password"
-                                        value={config.apiKey}
-                                        onChange={(e) => setConfig({ ...config, apiKey: e.target.value })}
-                                        placeholder="sk-..."
+                                    <label className="block text-xs font-medium text-stone-500 mb-1.5">接入方式</label>
+                                    <select
+                                        value={config.integrationMode}
+                                        onChange={(e) => setConfig({ ...config, integrationMode: e.target.value as 'api' | 'cli-codebuddy' })}
                                         className="w-full bg-white border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500"
-                                    />
+                                    >
+                                        <option value="api">API 模式 (Claude API)</option>
+                                        <option value="cli-codebuddy">CLI 模式 (CodeBuddy)</option>
+                                    </select>
+                                    <p className="text-xs text-stone-400 mt-1">
+                                        {config.integrationMode === 'api' 
+                                            ? '使用 API 直接调用 AI 模型' 
+                                            : '使用 CodeBuddy CLI 工具运行（需要先安装 codebuddy 命令）'}
+                                    </p>
                                 </div>
-                                <div>
-                                    <label className="block text-xs font-medium text-stone-500 mb-1.5">API URL</label>
-                                    <input
-                                        type="text"
-                                        value={config.apiUrl}
-                                        onChange={(e) => setConfig({ ...config, apiUrl: e.target.value })}
-                                        placeholder="https://api.anthropic.com"
-                                        className="w-full bg-white border border-stone-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-xs font-medium text-stone-500 mb-1.5">模型名称</label>
-                                    <input
-                                        type="text"
-                                        value={config.model}
-                                        onChange={(e) => setConfig({ ...config, model: e.target.value })}
-                                        placeholder="glm-4.7"
-                                        className="w-full bg-white border border-stone-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500"
-                                    />
-                                    <p className="text-xs text-stone-400 mt-1">输入模型名称，如 MiniMax-M2.1</p>
-                                </div>
+                                {config.integrationMode === 'api' && (
+                                    <>
+                                        <div>
+                                            <label className="block text-xs font-medium text-stone-500 mb-1.5">API Key</label>
+                                            <input
+                                                type="password"
+                                                value={config.apiKey}
+                                                onChange={(e) => setConfig({ ...config, apiKey: e.target.value })}
+                                                placeholder="sk-..."
+                                                className="w-full bg-white border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-medium text-stone-500 mb-1.5">API URL</label>
+                                            <input
+                                                type="text"
+                                                value={config.apiUrl}
+                                                onChange={(e) => setConfig({ ...config, apiUrl: e.target.value })}
+                                                placeholder="https://api.anthropic.com"
+                                                className="w-full bg-white border border-stone-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-medium text-stone-500 mb-1.5">模型名称</label>
+                                            <input
+                                                type="text"
+                                                value={config.model}
+                                                onChange={(e) => setConfig({ ...config, model: e.target.value })}
+                                                placeholder="glm-4.7"
+                                                className="w-full bg-white border border-stone-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500"
+                                            />
+                                            <p className="text-xs text-stone-400 mt-1">输入模型名称，如 MiniMax-M2.1</p>
+                                        </div>
+                                    </>
+                                )}
+                                {config.integrationMode === 'cli-codebuddy' && (
+                                    <div className="bg-amber-50 text-amber-700 rounded-lg p-3 text-xs space-y-2">
+                                        <p className="font-medium">CodeBuddy CLI 模式说明：</p>
+                                        <ul className="list-disc list-inside space-y-1">
+                                            <li>需要在系统中安装 <code className="bg-amber-100 px-1 rounded">codebuddy</code> 命令</li>
+                                            <li>执行 <code className="bg-amber-100 px-1 rounded">codebuddy --help</code> 查看可用参数</li>
+                                            <li>CodeBuddy 的参数与 Claude Code 基本一致</li>
+                                            <li>API Key 和模型配置可以通过环境变量传递给 codebuddy</li>
+                                        </ul>
+                                    </div>
+                                )}
                             </>
                         )}
 

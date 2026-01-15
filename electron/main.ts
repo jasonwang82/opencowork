@@ -5,6 +5,7 @@ import os from 'node:os'
 import fs from 'node:fs'
 import dotenv from 'dotenv'
 import { AgentRuntime } from './agent/AgentRuntime'
+import { CLIAgentRuntime } from './agent/CLIAgentRuntime'
 import { configStore } from './config/ConfigStore'
 import { sessionStore } from './config/SessionStore'
 import Anthropic from '@anthropic-ai/sdk'
@@ -46,7 +47,7 @@ if (VITE_DEV_SERVER_URL) {
 let mainWin: BrowserWindow | null = null
 let floatingBallWin: BrowserWindow | null = null
 let tray: Tray | null = null
-let agent: AgentRuntime | null = null
+let agent: AgentRuntime | CLIAgentRuntime | null = null
 
 // Ball state
 let isBallExpanded = false
@@ -231,6 +232,7 @@ ipcMain.handle('config:set-all', (_, cfg) => {
   configStore.set('authorizedFolders', cfg.authorizedFolders || [])
   configStore.setNetworkAccess(cfg.networkAccess || false)
   if (cfg.shortcut) configStore.set('shortcut', cfg.shortcut)
+  if (cfg.integrationMode) configStore.setIntegrationMode(cfg.integrationMode)
 
   // Reinitialize agent
   initializeAgent()
@@ -452,21 +454,37 @@ ipcMain.handle('skills:delete', async (_, skillId: string) => {
 
 function initializeAgent() {
   const apiKey = configStore.getApiKey() || process.env.ANTHROPIC_API_KEY
-  if (apiKey && mainWin) {
-    agent = new AgentRuntime(apiKey, mainWin, configStore.getModel(), configStore.getApiUrl())
-    // Add floating ball window to receive updates
+  const integrationMode = configStore.getIntegrationMode()
+  
+  if (!mainWin) {
+    console.warn('Main window not available for agent initialization')
+    return
+  }
+
+  if (integrationMode === 'cli-codebuddy') {
+    // Initialize CLI-based CodeBuddy agent
+    console.log('Initializing CodeBuddy CLI Agent...')
+    agent = new CLIAgentRuntime(mainWin)
     if (floatingBallWin) {
       agent.addWindow(floatingBallWin)
     }
     (global as Record<string, unknown>).agent = agent
-
-    // Trigger async initialization for MCP and Skills
-    agent.initialize().catch(err => console.error('Agent initialization failed:', err));
-
-    console.log('Agent initialized with model:', configStore.getModel())
-    console.log('API URL:', configStore.getApiUrl())
+    agent.initialize().catch(err => console.error('CodeBuddy CLI initialization failed:', err))
+    console.log('CodeBuddy CLI Agent initialized')
   } else {
-    console.warn('No API Key found. Please configure in Settings.')
+    // Initialize API-based agent (default)
+    if (apiKey) {
+      agent = new AgentRuntime(apiKey, mainWin, configStore.getModel(), configStore.getApiUrl())
+      if (floatingBallWin) {
+        agent.addWindow(floatingBallWin)
+      }
+      (global as Record<string, unknown>).agent = agent
+      agent.initialize().catch(err => console.error('Agent initialization failed:', err))
+      console.log('Agent initialized with model:', configStore.getModel())
+      console.log('API URL:', configStore.getApiUrl())
+    } else {
+      console.warn('No API Key found. Please configure in Settings.')
+    }
   }
 }
 
