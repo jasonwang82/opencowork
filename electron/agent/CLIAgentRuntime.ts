@@ -40,11 +40,17 @@ export class CLIAgentRuntime {
             const testProcess = spawn('codebuddy', ['--version'], { shell: false });
             testProcess.on('error', (err) => {
                 console.error('CodeBuddy CLI not found:', err);
-                this.broadcast('agent:error', 'CodeBuddy CLI is not installed or not in PATH. Please install it first.');
+                this.broadcast('agent:error', 
+                    'CodeBuddy CLI is not installed or not in PATH. ' +
+                    'Please install it by following the instructions at the CodeBuddy documentation. ' +
+                    'After installation, make sure the "codebuddy" command is available in your system PATH.'
+                );
             });
             testProcess.on('close', (code) => {
                 if (code === 0) {
                     console.log('CodeBuddy CLI is available');
+                } else {
+                    console.warn('CodeBuddy CLI check returned non-zero exit code:', code);
                 }
             });
         } catch (error) {
@@ -88,9 +94,11 @@ export class CLIAgentRuntime {
                 userContent = input;
             } else {
                 userContent = input.content;
-                // Note: CLI mode might not support images directly
+                // Note: CLI mode does not support images
                 if (input.images && input.images.length > 0) {
-                    this.broadcast('agent:error', 'Image input is not supported in CodeBuddy CLI mode.');
+                    const errorMsg = 'Image input is not supported in CodeBuddy CLI mode.';
+                    this.broadcast('agent:error', errorMsg);
+                    throw new Error(errorMsg);
                 }
             }
 
@@ -155,6 +163,8 @@ export class CLIAgentRuntime {
                 shell: false, // Use shell: false for better security
                 env: {
                     ...process.env,
+                    // Note: Using both --api-key flag and CODEBUDDY_API_KEY env var
+                    // for maximum compatibility with different codebuddy implementations
                     CODEBUDDY_API_KEY: apiKey || process.env.ANTHROPIC_API_KEY || '',
                 }
             });

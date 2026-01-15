@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { X, Settings, FolderOpen, Server, Check, Plus, Trash2, Edit2, Zap, Eye } from 'lucide-react';
 import { SkillEditor } from './SkillEditor';
 import { useI18n } from '../i18n/useI18n';
+import type { IntegrationMode } from '../../electron/config/ConfigStore';
 
 interface SettingsViewProps {
     onClose: () => void;
@@ -14,7 +15,7 @@ interface Config {
     authorizedFolders: string[];
     networkAccess: boolean;
     shortcut: string;
-    integrationMode: 'api' | 'cli-codebuddy';
+    integrationMode: IntegrationMode;
 }
 
 interface SkillInfo {
