@@ -185,13 +185,8 @@ export class CLIAgentRuntime {
                 const text = data.toString();
                 stdoutBuffer += text;
                 
-                // Update the assistant message in history with accumulated content
-                this.history[assistantMessageIndex] = {
-                    role: 'assistant',
-                    content: stdoutBuffer
-                };
-                
                 // Stream output token by token to UI
+                // The UI will accumulate these tokens in a streaming display
                 this.broadcast('agent:stream-token', text);
                 console.log('[CodeBuddy]:', text);
             });
