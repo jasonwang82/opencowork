@@ -6,6 +6,8 @@ export interface ToolPermission {
     grantedAt: number;      // Timestamp
 }
 
+export type IntegrationMode = 'api' | 'cli-codebuddy';
+
 export interface AppConfig {
     apiKey: string;
     apiUrl: string;
@@ -14,6 +16,7 @@ export interface AppConfig {
     networkAccess: boolean;
     shortcut: string;
     allowedPermissions: ToolPermission[];
+    integrationMode: IntegrationMode;
 }
 
 const defaults: AppConfig = {
@@ -23,7 +26,8 @@ const defaults: AppConfig = {
     authorizedFolders: [],
     networkAccess: true, // "Open and use" implies network should be on
     shortcut: 'Alt+Space',
-    allowedPermissions: []
+    allowedPermissions: [],
+    integrationMode: 'api'
 };
 
 class ConfigStore {
@@ -143,6 +147,15 @@ class ConfigStore {
 
     clearAllPermissions(): void {
         this.store.set('allowedPermissions', []);
+    }
+
+    // Integration Mode
+    getIntegrationMode(): IntegrationMode {
+        return this.store.get('integrationMode') || 'api';
+    }
+
+    setIntegrationMode(mode: IntegrationMode): void {
+        this.store.set('integrationMode', mode);
     }
 }
 

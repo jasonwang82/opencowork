@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { X, Settings, FolderOpen, Server, Check, Plus, Trash2, Edit2, Zap, Eye } from 'lucide-react';
 import { SkillEditor } from './SkillEditor';
+import { useI18n } from '../i18n/useI18n';
+import type { IntegrationMode } from '../../electron/config/ConfigStore';
 
 interface SettingsViewProps {
     onClose: () => void;
@@ -13,6 +15,7 @@ interface Config {
     authorizedFolders: string[];
     networkAccess: boolean;
     shortcut: string;
+    integrationMode: IntegrationMode;
 }
 
 interface SkillInfo {
@@ -29,13 +32,15 @@ interface ToolPermission {
 }
 
 export function SettingsView({ onClose }: SettingsViewProps) {
+    const { t } = useI18n();
     const [config, setConfig] = useState<Config>({
         apiKey: '',
         apiUrl: 'https://api.minimaxi.com/anthropic',
         model: 'MiniMax-M2.1',
         authorizedFolders: [],
         networkAccess: false,
-        shortcut: 'Alt+Space'
+        shortcut: 'Alt+Space',
+        integrationMode: 'api'
     });
     const [saved, setSaved] = useState(false);
     const [activeTab, setActiveTab] = useState<'api' | 'folders' | 'mcp' | 'skills' | 'advanced'>('api');
@@ -217,36 +222,67 @@ export function SettingsView({ onClose }: SettingsViewProps) {
                         {activeTab === 'api' && (
                             <>
                                 <div>
-                                    <label className="block text-xs font-medium text-stone-500 mb-1.5">API Key</label>
-                                    <input
-                                        type="password"
-                                        value={config.apiKey}
-                                        onChange={(e) => setConfig({ ...config, apiKey: e.target.value })}
-                                        placeholder="sk-..."
+                                    <label className="block text-xs font-medium text-stone-500 mb-1.5">{t('integrationMode')}</label>
+                                    <select
+                                        value={config.integrationMode}
+                                        onChange={(e) => setConfig({ ...config, integrationMode: e.target.value as 'api' | 'cli-codebuddy' })}
                                         className="w-full bg-white border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500"
-                                    />
+                                    >
+                                        <option value="api">{t('apiMode')}</option>
+                                        <option value="cli-codebuddy">{t('cliMode')}</option>
+                                    </select>
+                                    <p className="text-xs text-stone-400 mt-1">
+                                        {config.integrationMode === 'api' 
+                                            ? t('apiModeDescription')
+                                            : t('cliModeDescription')}
+                                    </p>
                                 </div>
-                                <div>
-                                    <label className="block text-xs font-medium text-stone-500 mb-1.5">API URL</label>
-                                    <input
-                                        type="text"
-                                        value={config.apiUrl}
-                                        onChange={(e) => setConfig({ ...config, apiUrl: e.target.value })}
-                                        placeholder="https://api.anthropic.com"
-                                        className="w-full bg-white border border-stone-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-xs font-medium text-stone-500 mb-1.5">模型名称</label>
-                                    <input
-                                        type="text"
-                                        value={config.model}
-                                        onChange={(e) => setConfig({ ...config, model: e.target.value })}
-                                        placeholder="glm-4.7"
-                                        className="w-full bg-white border border-stone-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500"
-                                    />
-                                    <p className="text-xs text-stone-400 mt-1">输入模型名称，如 MiniMax-M2.1</p>
-                                </div>
+                                {config.integrationMode === 'api' && (
+                                    <>
+                                        <div>
+                                            <label className="block text-xs font-medium text-stone-500 mb-1.5">API Key</label>
+                                            <input
+                                                type="password"
+                                                value={config.apiKey}
+                                                onChange={(e) => setConfig({ ...config, apiKey: e.target.value })}
+                                                placeholder="sk-..."
+                                                className="w-full bg-white border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-medium text-stone-500 mb-1.5">API URL</label>
+                                            <input
+                                                type="text"
+                                                value={config.apiUrl}
+                                                onChange={(e) => setConfig({ ...config, apiUrl: e.target.value })}
+                                                placeholder="https://api.anthropic.com"
+                                                className="w-full bg-white border border-stone-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-medium text-stone-500 mb-1.5">{t('modelName')}</label>
+                                            <input
+                                                type="text"
+                                                value={config.model}
+                                                onChange={(e) => setConfig({ ...config, model: e.target.value })}
+                                                placeholder="glm-4.7"
+                                                className="w-full bg-white border border-stone-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500"
+                                            />
+                                            <p className="text-xs text-stone-400 mt-1">{t('modelNameDescription')}</p>
+                                        </div>
+                                    </>
+                                )}
+                                {config.integrationMode === 'cli-codebuddy' && (
+                                    <div className="bg-amber-50 text-amber-700 rounded-lg p-3 text-xs space-y-2">
+                                        <p className="font-medium">{t('codeBuddyInstructions')}</p>
+                                        <ul className="list-disc list-inside space-y-1">
+                                            <li>{t('codeBuddyInstallRequired')}</li>
+                                            <li>{t('codeBuddyHelp')}</li>
+                                            <li>{t('codeBuddyCompatible')}</li>
+                                            <li>{t('codeBuddyEnvVars')}</li>
+                                        </ul>
+                                    </div>
+                                )}
                             </>
                         )}
 
