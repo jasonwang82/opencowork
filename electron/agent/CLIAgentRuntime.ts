@@ -119,6 +119,13 @@ export class CLIAgentRuntime {
         }
     }
 
+    private removeMessageFromHistory(message: Anthropic.MessageParam) {
+        const idx = this.history.indexOf(message);
+        if (idx !== -1) {
+            this.history.splice(idx, 1);
+        }
+    }
+
     private async executeCodeBuddy(userMessage: string) {
         const authorizedFolders = permissionManager.getAuthorizedFolders();
         const workingDir = authorizedFolders[0] || process.cwd();
@@ -205,10 +212,7 @@ export class CLIAgentRuntime {
                     resolve();
                 } else {
                     // Error - remove the empty assistant message and show error
-                    const idx = this.history.indexOf(assistantMessage);
-                    if (idx !== -1) {
-                        this.history.splice(idx, 1);
-                    }
+                    this.removeMessageFromHistory(assistantMessage);
                     const errorMessage = stderrBuffer || `CodeBuddy process exited with code ${code}`;
                     this.broadcast('agent:error', errorMessage);
                     this.notifyUpdate();
@@ -220,10 +224,7 @@ export class CLIAgentRuntime {
             this.currentProcess.on('error', (err) => {
                 console.error('[CodeBuddy Process Error]:', err);
                 // Remove the empty assistant message on error
-                const idx = this.history.indexOf(assistantMessage);
-                if (idx !== -1) {
-                    this.history.splice(idx, 1);
-                }
+                this.removeMessageFromHistory(assistantMessage);
                 this.broadcast('agent:error', `Failed to start CodeBuddy: ${err.message}`);
                 this.notifyUpdate();
                 this.currentProcess = null;
