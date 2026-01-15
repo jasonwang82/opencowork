@@ -159,11 +159,11 @@ export class CLIAgentRuntime {
 
         // Add an empty assistant message to history immediately
         // This ensures the UI shows the message structure during streaming
-        const assistantMessageIndex = this.history.length;
-        this.history.push({
+        const assistantMessage: Anthropic.MessageParam = {
             role: 'assistant',
             content: ''
-        });
+        };
+        this.history.push(assistantMessage);
         this.notifyUpdate();
 
         return new Promise<void>((resolve, reject) => {
@@ -200,15 +200,15 @@ export class CLIAgentRuntime {
             this.currentProcess.on('close', (code) => {
                 if (code === 0) {
                     // Success - update final assistant response in history
-                    this.history[assistantMessageIndex] = {
-                        role: 'assistant',
-                        content: stdoutBuffer || 'Command executed successfully.'
-                    };
+                    assistantMessage.content = stdoutBuffer || 'Command executed successfully.';
                     this.notifyUpdate();
                     resolve();
                 } else {
                     // Error - remove the empty assistant message and show error
-                    this.history.splice(assistantMessageIndex, 1);
+                    const idx = this.history.indexOf(assistantMessage);
+                    if (idx !== -1) {
+                        this.history.splice(idx, 1);
+                    }
                     const errorMessage = stderrBuffer || `CodeBuddy process exited with code ${code}`;
                     this.broadcast('agent:error', errorMessage);
                     this.notifyUpdate();
@@ -220,7 +220,10 @@ export class CLIAgentRuntime {
             this.currentProcess.on('error', (err) => {
                 console.error('[CodeBuddy Process Error]:', err);
                 // Remove the empty assistant message on error
-                this.history.splice(assistantMessageIndex, 1);
+                const idx = this.history.indexOf(assistantMessage);
+                if (idx !== -1) {
+                    this.history.splice(idx, 1);
+                }
                 this.broadcast('agent:error', `Failed to start CodeBuddy: ${err.message}`);
                 this.notifyUpdate();
                 this.currentProcess = null;
