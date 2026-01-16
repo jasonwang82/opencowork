@@ -6,7 +6,7 @@ export interface ToolPermission {
     grantedAt: number;      // Timestamp
 }
 
-export type IntegrationMode = 'api' | 'cli-codebuddy';
+export type IntegrationMode = 'api' | 'cli-codebuddy' | 'sdk-codebuddy';
 
 export interface AppConfig {
     apiKey: string;
@@ -22,12 +22,12 @@ export interface AppConfig {
 const defaults: AppConfig = {
     apiKey: '',
     apiUrl: 'https://api.minimaxi.com/anthropic',
-    model: 'MiniMax-M2.1',
+    model: 'claude-opus-4.5',
     authorizedFolders: [],
     networkAccess: true, // "Open and use" implies network should be on
     shortcut: 'Alt+Space',
     allowedPermissions: [],
-    integrationMode: 'api'
+    integrationMode: 'cli-codebuddy'
 };
 
 class ConfigStore {
@@ -156,6 +156,15 @@ class ConfigStore {
 
     setIntegrationMode(mode: IntegrationMode): void {
         this.store.set('integrationMode', mode);
+    }
+
+    // CodeBuddy specific
+    getCodeBuddyApiKey(): string {
+        return process.env.CODEBUDDY_API_KEY || this.store.get('apiKey') || '';
+    }
+
+    getCodeBuddyInternetEnv(): string {
+        return process.env.CODEBUDDY_INTERNET_ENVIRONMENT || '';
     }
 }
 

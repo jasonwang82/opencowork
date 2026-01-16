@@ -20,6 +20,15 @@ interface SessionSummary {
     updatedAt: number;
 }
 
+interface CLIProgress {
+    type: 'init' | 'tool_use' | 'tool_result' | 'complete';
+    message: string;
+    tool?: string;
+    input?: Record<string, unknown>;
+    model?: string;
+    is_error?: boolean;
+}
+
 interface CoworkViewProps {
     history: Anthropic.MessageParam[];
     onSendMessage: (message: string | { content: string, images: string[] }) => void;
@@ -34,6 +43,7 @@ export function CoworkView({ history, onSendMessage, onAbort, isProcessing, onOp
     const [mode, setMode] = useState<Mode>('work');
     const [expandedBlocks, setExpandedBlocks] = useState<Set<string>>(new Set());
     const [streamingText, setStreamingText] = useState('');
+    const [progressMessages, setProgressMessages] = useState<CLIProgress[]>([]);
     const [workingDir, setWorkingDir] = useState<string | null>(null);
     const [modelName, setModelName] = useState('glm-4.7');
     const [permissionRequest, setPermissionRequest] = useState<PermissionRequest | null>(null);
@@ -56,10 +66,17 @@ export function CoworkView({ history, onSendMessage, onAbort, isProcessing, onOp
             setStreamingText(prev => prev + token);
         });
 
+        // Listen for CLI progress messages
+        const removeProgressListener = window.ipcRenderer.on('agent:cli-progress', (_event, ...args) => {
+            const progress = args[0] as CLIProgress;
+            setProgressMessages(prev => [...prev, progress]);
+        });
+
         // Clear streaming when history updates and save session
         const removeHistoryListener = window.ipcRenderer.on('agent:history-update', (_event, ...args) => {
             const newHistory = args[0] as Anthropic.MessageParam[];
             setStreamingText('');
+            setProgressMessages([]); // Clear progress messages
             // Auto-save session
             if (newHistory && newHistory.length > 0) {
                 window.ipcRenderer.invoke('session:save', newHistory);
@@ -74,6 +91,7 @@ export function CoworkView({ history, onSendMessage, onAbort, isProcessing, onOp
 
         return () => {
             removeStreamListener?.();
+            removeProgressListener?.();
             removeHistoryListener?.();
             removeConfirmListener?.();
         };
@@ -415,10 +433,46 @@ export function CoworkView({ history, onSendMessage, onAbort, isProcessing, onOp
                                     </div>
                                 </div>
                             )}
+
+                            {/* CLI Progress Messages */}
+                            {progressMessages.length > 0 && (
+                                <div className="space-y-2 animate-in fade-in duration-200">
+                                    {progressMessages.map((progress, idx) => (
+                                        <div
+                                            key={idx}
+                                            className={`flex items-center gap-2 text-sm px-3 py-2 rounded-lg ${
+                                                progress.type === 'complete'
+                                                    ? progress.is_error
+                                                        ? 'bg-red-50 text-red-600'
+                                                        : 'bg-green-50 text-green-600'
+                                                    : progress.type === 'tool_use'
+                                                        ? 'bg-blue-50 text-blue-600'
+                                                        : 'bg-stone-100 text-stone-600'
+                                            }`}
+                                        >
+                                            {progress.type === 'init' && (
+                                                <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
+                                            )}
+                                            {progress.type === 'tool_use' && (
+                                                <Zap size={14} className="text-blue-500" />
+                                            )}
+                                            {progress.type === 'tool_result' && (
+                                                <Check size={14} className="text-green-500" />
+                                            )}
+                                            {progress.type === 'complete' && (
+                                                progress.is_error
+                                                    ? <AlertTriangle size={14} className="text-red-500" />
+                                                    : <Check size={14} className="text-green-500" />
+                                            )}
+                                            <span className="truncate">{progress.message}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
                         </>
                     )}
 
-                    {isProcessing && !streamingText && (
+                    {isProcessing && !streamingText && progressMessages.length === 0 && (
                         <div className="flex items-center gap-2 text-stone-400 text-sm animate-pulse">
                             <div className="w-1.5 h-1.5 bg-orange-500 rounded-full animate-bounce" />
                             <span>Thinking...</span>
@@ -677,7 +731,7 @@ function EmptyState({ mode, workingDir }: { mode: Mode, workingDir: string | nul
             </div>
             <div className="space-y-2">
                 <h2 className="text-xl font-semibold text-stone-800">
-                    {mode === 'chat' ? 'OpenCowork Chat' : 'OpenCowork Work'}
+                    {mode === 'chat' ? 'CodeBuddy Code Cowork Chat' : 'CodeBuddy Code Cowork'}
                 </h2>
                 <p className="text-stone-500 text-sm max-w-xs">
                     {mode === 'work' && !workingDir

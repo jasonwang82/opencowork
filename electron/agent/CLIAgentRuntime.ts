@@ -10,6 +10,27 @@ export type AgentMessage = {
     id?: string;
 };
 
+// CLI stream-json 输出的消息类型
+interface CLIStreamMessage {
+    type: 'system' | 'assistant' | 'user' | 'result';
+    subtype?: string;
+    uuid?: string;
+    session_id?: string;
+    message?: {
+        content: Array<{
+            type: string;
+            text?: string;
+            id?: string;
+            name?: string;
+            input?: Record<string, unknown>;
+            tool_use_id?: string;
+            content?: Array<{ type: string; text: string }>;
+        }>;
+    };
+    result?: string;
+    is_error?: boolean;
+}
+
 /**
  * CLIAgentRuntime - Integration with CodeBuddy CLI
  * 
@@ -34,12 +55,15 @@ export class CLIAgentRuntime {
     }
 
     public async initialize() {
-        console.log('Initializing CLIAgentRuntime (CodeBuddy)...');
+        console.log('[CLIAgentRuntime] Initializing CodeBuddy CLI...');
+        console.log('[CLIAgentRuntime] CODEBUDDY_API_KEY:', process.env.CODEBUDDY_API_KEY ? '***' + process.env.CODEBUDDY_API_KEY.slice(-8) : 'NOT SET');
+        console.log('[CLIAgentRuntime] CODEBUDDY_INTERNET_ENVIRONMENT:', process.env.CODEBUDDY_INTERNET_ENVIRONMENT || 'NOT SET');
+        
         // Check if codebuddy is available
         try {
             const testProcess = spawn('codebuddy', ['--version'], { shell: false });
             testProcess.on('error', (err) => {
-                console.error('CodeBuddy CLI not found:', err);
+                console.error('[CLIAgentRuntime] CodeBuddy CLI not found:', err);
                 this.broadcast('agent:error', 
                     'CodeBuddy CLI is not installed or not in PATH. ' +
                     'Please install it by following the instructions at the CodeBuddy documentation. ' +
@@ -48,13 +72,13 @@ export class CLIAgentRuntime {
             });
             testProcess.on('close', (code) => {
                 if (code === 0) {
-                    console.log('CodeBuddy CLI is available');
+                    console.log('[CLIAgentRuntime] CodeBuddy CLI is available');
                 } else {
-                    console.warn('CodeBuddy CLI check returned non-zero exit code:', code);
+                    console.warn('[CLIAgentRuntime] CodeBuddy CLI check returned non-zero exit code:', code);
                 }
             });
         } catch (error) {
-            console.error('Failed to check CodeBuddy CLI:', error);
+            console.error('[CLIAgentRuntime] Failed to check CodeBuddy CLI:', error);
         }
     }
 
@@ -131,38 +155,31 @@ export class CLIAgentRuntime {
         const workingDir = authorizedFolders[0] || process.cwd();
 
         // Build codebuddy command with arguments
-        // The command structure is similar to: codebuddy --message "user message" --directory "working dir"
+        // CodeBuddy CLI usage: codebuddy -p --output-format stream-json --permission-mode bypassPermissions [--model MODEL] [prompt]
         const args: string[] = [];
         
-        // Add working directory
-        if (workingDir) {
-            args.push('--directory', workingDir);
-        }
+        // Use print mode for non-interactive output
+        args.push('-p');
+        
+        // Use stream-json format to get structured output with tool calls
+        args.push('--output-format', 'stream-json');
+        
+        // Use permission mode to bypass permissions for automated use
+        args.push('--permission-mode', 'bypassPermissions');
 
-        // Add API key if available (some CLI tools support it)
-        const apiKey = configStore.getApiKey();
-        if (apiKey) {
-            args.push('--api-key', apiKey);
-        }
-
-        // Add model if specified
+        // Add model if specified (format: claude-opus-4.5, claude-sonnet-4-20250514, etc.)
         const model = configStore.getModel();
         if (model) {
             args.push('--model', model);
         }
 
-        // Add the user message
-        args.push('--message', userMessage);
+        // Add the user message as the prompt (must be last)
+        args.push(userMessage);
 
-        // Redact API key for logging
-        const logArgs = args.map((arg, idx) => {
-            if (args[idx - 1] === '--api-key') {
-                return '***REDACTED***';
-            }
-            return arg.includes(' ') ? `"${arg}"` : arg;
-        });
-
+        // Log the command (without sensitive info)
+        const logArgs = args.map(arg => arg.includes(' ') ? `"${arg}"` : arg);
         console.log(`[CLIAgentRuntime] Executing: codebuddy ${logArgs.join(' ')}`);
+        console.log(`[CLIAgentRuntime] Working directory: ${workingDir}`);
 
         // Add an empty assistant message to history immediately
         // This ensures the UI shows the message structure during streaming
@@ -174,50 +191,103 @@ export class CLIAgentRuntime {
         this.notifyUpdate();
 
         return new Promise<void>((resolve, reject) => {
+            // 获取 CodeBuddy 特定的环境变量
+            const codeBuddyApiKey = process.env.CODEBUDDY_API_KEY || configStore.getApiKey() || process.env.ANTHROPIC_API_KEY || '';
+            const codeBuddyInternetEnv = process.env.CODEBUDDY_INTERNET_ENVIRONMENT || '';
+
+            console.log('[CLIAgentRuntime] Environment variables:');
+            console.log('[CLIAgentRuntime] CODEBUDDY_API_KEY:', codeBuddyApiKey ? '***' + codeBuddyApiKey.slice(-8) : 'NOT SET');
+            console.log('[CLIAgentRuntime] CODEBUDDY_INTERNET_ENVIRONMENT:', codeBuddyInternetEnv || 'NOT SET');
+
             this.currentProcess = spawn('codebuddy', args, {
                 cwd: workingDir,
                 shell: false, // Use shell: false for better security
                 env: {
                     ...process.env,
-                    // Note: Using both --api-key flag and CODEBUDDY_API_KEY env var
-                    // for maximum compatibility with different codebuddy implementations
-                    CODEBUDDY_API_KEY: apiKey || process.env.ANTHROPIC_API_KEY || '',
+                    CODEBUDDY_API_KEY: codeBuddyApiKey,
+                    CODEBUDDY_INTERNET_ENVIRONMENT: codeBuddyInternetEnv,
                 }
             });
 
-            let stdoutBuffer = '';
+            let jsonBuffer = '';
             let stderrBuffer = '';
+            let finalResult = '';
 
             this.currentProcess.stdout?.on('data', (data) => {
-                const text = data.toString();
-                stdoutBuffer += text;
-                
-                // Stream output token by token to UI
-                this.broadcast('agent:stream-token', text);
-                console.log('[CodeBuddy]:', text);
+                try {
+                    const text = data.toString();
+                    jsonBuffer += text;
+                    
+                    // Parse JSON messages line by line
+                    const lines = jsonBuffer.split('\n');
+                    jsonBuffer = lines.pop() || ''; // Keep incomplete line in buffer
+                    
+                    for (const line of lines) {
+                        const trimmedLine = line.trim();
+                        if (!trimmedLine || !trimmedLine.startsWith('{')) continue;
+                        
+                        try {
+                            const msg = JSON.parse(trimmedLine) as CLIStreamMessage;
+                            this.handleStreamMessage(msg);
+                            
+                            // Capture final result text
+                            if (msg.type === 'result' && msg.result) {
+                                finalResult = msg.result;
+                            }
+                        } catch (e) {
+                            // Not valid JSON, might be partial or status indicator
+                            console.log('[CLIAgentRuntime] Non-JSON output:', trimmedLine);
+                        }
+                    }
+                } catch (err) {
+                    console.error('[CLIAgentRuntime] Error processing stdout:', err);
+                }
             });
 
             this.currentProcess.stderr?.on('data', (data) => {
-                const text = data.toString();
-                stderrBuffer += text;
-                console.error('[CodeBuddy Error]:', text);
+                try {
+                    const text = data.toString();
+                    stderrBuffer += text;
+                    console.error('[CodeBuddy Error]:', text);
+                } catch (err) {
+                    console.error('[CLIAgentRuntime] Error processing stderr:', err);
+                }
             });
 
             this.currentProcess.on('close', (code) => {
-                if (code === 0) {
-                    // Success - update final assistant response in history
-                    assistantMessage.content = stdoutBuffer || 'Command executed successfully.';
-                    this.notifyUpdate();
-                    resolve();
-                } else {
-                    // Error - remove the empty assistant message and show error
-                    this.removeMessageFromHistory(assistantMessage);
-                    const errorMessage = stderrBuffer || `CodeBuddy process exited with code ${code}`;
-                    this.broadcast('agent:error', errorMessage);
-                    this.notifyUpdate();
-                    reject(new Error(errorMessage));
+                try {
+                    // Process any remaining buffer
+                    if (jsonBuffer.trim() && jsonBuffer.trim().startsWith('{')) {
+                        try {
+                            const msg = JSON.parse(jsonBuffer.trim()) as CLIStreamMessage;
+                            this.handleStreamMessage(msg);
+                            if (msg.type === 'result' && msg.result) {
+                                finalResult = msg.result;
+                            }
+                        } catch (e) {
+                            // Ignore parse errors for incomplete data
+                        }
+                    }
+
+                    if (code === 0) {
+                        // Success - update final assistant response in history
+                        assistantMessage.content = finalResult || 'Command executed successfully.';
+                        this.notifyUpdate();
+                        resolve();
+                    } else {
+                        // Error - remove the empty assistant message and show error
+                        this.removeMessageFromHistory(assistantMessage);
+                        const errorMessage = stderrBuffer || `CodeBuddy process exited with code ${code}`;
+                        this.broadcast('agent:error', errorMessage);
+                        this.notifyUpdate();
+                        reject(new Error(errorMessage));
+                    }
+                } catch (err) {
+                    console.error('[CLIAgentRuntime] Error in close handler:', err);
+                    reject(err);
+                } finally {
+                    this.currentProcess = null;
                 }
-                this.currentProcess = null;
             });
 
             this.currentProcess.on('error', (err) => {
@@ -232,11 +302,114 @@ export class CLIAgentRuntime {
         });
     }
 
-    private broadcast(channel: string, data: unknown) {
-        for (const win of this.windows) {
-            if (!win.isDestroyed()) {
-                win.webContents.send(channel, data);
+    /**
+     * Handle stream-json messages and broadcast progress to UI
+     */
+    private handleStreamMessage(msg: CLIStreamMessage) {
+        try {
+            console.log('[CLIAgentRuntime] Stream message:', msg.type, msg.subtype || '');
+            
+            if (msg.type === 'system' && msg.subtype === 'init') {
+                // System initialization - broadcast start
+                this.broadcast('agent:cli-progress', {
+                    type: 'init',
+                    message: '正在初始化...',
+                    model: (msg as unknown as { model?: string }).model
+                });
+            } else if (msg.type === 'assistant' && msg.message?.content) {
+                // Process assistant message content
+                for (const block of msg.message.content) {
+                    if (block.type === 'tool_use' && block.name) {
+                        // Tool call - broadcast progress
+                        const toolName = block.name;
+                        const input = block.input || {};
+                        
+                        let progressMessage = '';
+                        switch (toolName) {
+                            case 'Bash':
+                                progressMessage = `执行命令: ${(input as { command?: string }).command || ''}`;
+                                break;
+                            case 'Read':
+                                progressMessage = `读取文件: ${(input as { file_path?: string }).file_path || ''}`;
+                                break;
+                            case 'Write':
+                                progressMessage = `写入文件: ${(input as { file_path?: string }).file_path || ''}`;
+                                break;
+                            case 'Edit':
+                                progressMessage = `编辑文件: ${(input as { file_path?: string }).file_path || ''}`;
+                                break;
+                            case 'Glob':
+                                progressMessage = `搜索文件: ${(input as { pattern?: string }).pattern || ''}`;
+                                break;
+                            case 'Grep':
+                                progressMessage = `搜索内容: ${(input as { pattern?: string }).pattern || ''}`;
+                                break;
+                            case 'WebFetch':
+                                progressMessage = `获取网页: ${(input as { url?: string }).url || ''}`;
+                                break;
+                            case 'WebSearch':
+                                progressMessage = `搜索网页: ${(input as { query?: string }).query || ''}`;
+                                break;
+                            case 'Task':
+                                progressMessage = `启动任务: ${(input as { description?: string }).description || ''}`;
+                                break;
+                            case 'TodoWrite':
+                                progressMessage = '更新任务列表';
+                                break;
+                            default:
+                                progressMessage = `调用工具: ${toolName}`;
+                        }
+                        
+                        this.broadcast('agent:cli-progress', {
+                            type: 'tool_use',
+                            tool: toolName,
+                            message: progressMessage,
+                            input: input
+                        });
+                    } else if (block.type === 'text' && block.text) {
+                        // Text content - stream to UI
+                        this.broadcast('agent:stream-token', block.text);
+                    }
+                }
+            } else if (msg.type === 'user' && msg.message?.content) {
+                // Tool result - could show completion
+                for (const block of msg.message.content) {
+                    if (block.type === 'tool_result' && block.tool_use_id) {
+                        this.broadcast('agent:cli-progress', {
+                            type: 'tool_result',
+                            message: '工具执行完成'
+                        });
+                    }
+                }
+            } else if (msg.type === 'result') {
+                // Final result
+                this.broadcast('agent:cli-progress', {
+                    type: 'complete',
+                    message: '执行完成',
+                    is_error: msg.is_error
+                });
             }
+        } catch (err) {
+            console.error('[CLIAgentRuntime] Error handling stream message:', err);
+        }
+    }
+
+    private broadcast(channel: string, data: unknown) {
+        try {
+            // Filter out destroyed windows first
+            this.windows = this.windows.filter(win => !win.isDestroyed());
+            
+            for (const win of this.windows) {
+                try {
+                    if (!win.isDestroyed() && win.webContents && !win.webContents.isDestroyed()) {
+                        win.webContents.send(channel, data);
+                    }
+                } catch (err) {
+                    console.error('[CLIAgentRuntime] Error sending to window:', err);
+                }
+            }
+        } catch (err) {
+            console.error('[CLIAgentRuntime] Error broadcasting:', err);
         }
     }
 

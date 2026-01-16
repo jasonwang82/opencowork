@@ -6,6 +6,7 @@ import fs from 'node:fs'
 import dotenv from 'dotenv'
 import { AgentRuntime } from './agent/AgentRuntime'
 import { CLIAgentRuntime } from './agent/CLIAgentRuntime'
+import { CodeBuddySDKRuntime } from './agent/CodeBuddySDKRuntime'
 import { configStore } from './config/ConfigStore'
 import { sessionStore } from './config/SessionStore'
 import Anthropic from '@anthropic-ai/sdk'
@@ -20,6 +21,32 @@ declare global {
 }
 
 dotenv.config()
+
+// GPU crash protection - disable GPU acceleration to prevent crashes
+app.disableHardwareAcceleration()
+app.commandLine.appendSwitch('disable-gpu')
+app.commandLine.appendSwitch('disable-gpu-compositing')
+app.commandLine.appendSwitch('disable-gpu-sandbox')
+app.commandLine.appendSwitch('disable-software-rasterizer')
+app.commandLine.appendSwitch('no-sandbox')
+app.commandLine.appendSwitch('ignore-gpu-blacklist')
+app.commandLine.appendSwitch('disable-gpu-driver-bug-workarounds')
+
+// Disable default error dialog - handle errors silently
+dialog.showErrorBox = (title: string, content: string) => {
+  console.error(`[Main] Error Dialog Suppressed - ${title}: ${content}`)
+}
+
+// Global error handlers to prevent crashes
+process.on('uncaughtException', (error) => {
+  console.error('[Main] Uncaught Exception:', error)
+  // Don't exit, just log
+})
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[Main] Unhandled Rejection at:', promise, 'reason:', reason)
+  // Don't exit, just log
+})
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -47,7 +74,7 @@ if (VITE_DEV_SERVER_URL) {
 let mainWin: BrowserWindow | null = null
 let floatingBallWin: BrowserWindow | null = null
 let tray: Tray | null = null
-let agent: AgentRuntime | CLIAgentRuntime | null = null
+let agent: AgentRuntime | CLIAgentRuntime | CodeBuddySDKRuntime | null = null
 
 // Ball state
 let isBallExpanded = false
@@ -68,6 +95,21 @@ app.on('window-all-closed', () => {
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) {
     createMainWindow()
+  }
+})
+
+// Handle GPU process crash - prevent app from crashing
+app.on('gpu-process-crashed', (event, killed) => {
+  console.error('[Main] GPU process crashed, killed:', killed)
+  // Don't quit the app, let it continue without GPU
+})
+
+// Handle child process crash
+app.on('child-process-gone', (event, details) => {
+  console.error('[Main] Child process gone:', details.type, details.reason)
+  // Don't quit for GPU crashes
+  if (details.type === 'GPU') {
+    console.log('[Main] GPU process crashed, app will continue...')
   }
 })
 
@@ -116,7 +158,7 @@ app.whenReady().then(() => {
     mainWin?.show()
   }
 
-  console.log('OpenCowork started. Press Alt+Space to toggle floating ball.')
+  console.log('CodeBuddy Code Cowork started. Press Alt+Space to toggle floating ball.')
 })
 
 
@@ -456,34 +498,58 @@ function initializeAgent() {
   const apiKey = configStore.getApiKey() || process.env.ANTHROPIC_API_KEY
   const integrationMode = configStore.getIntegrationMode()
   
+  console.log('[main] Initializing agent...')
+  console.log('[main] Integration mode:', integrationMode)
+
   if (!mainWin) {
-    console.warn('Main window not available for agent initialization')
+    console.warn('[main] Main window not available for agent initialization')
     return
   }
 
-  if (integrationMode === 'cli-codebuddy') {
+  if (integrationMode === 'sdk-codebuddy') {
+    // Initialize SDK-based CodeBuddy agent
+    const codeBuddyApiKey = configStore.getCodeBuddyApiKey()
+    const codeBuddyInternetEnv = configStore.getCodeBuddyInternetEnv()
+    
+    console.log('[main] Initializing CodeBuddy SDK Agent...')
+    console.log('[main] CodeBuddy API Key:', codeBuddyApiKey ? '***' + codeBuddyApiKey.slice(-8) : 'NOT SET')
+    console.log('[main] CodeBuddy Internet Env:', codeBuddyInternetEnv || 'NOT SET')
+
+    agent = new CodeBuddySDKRuntime(mainWin, codeBuddyApiKey, codeBuddyInternetEnv)
+    if (floatingBallWin) {
+      agent.addWindow(floatingBallWin)
+    }
+    (global as Record<string, unknown>).agent = agent
+    agent.initialize().catch(err => console.error('[main] CodeBuddy SDK initialization failed:', err))
+    console.log('[main] CodeBuddy SDK Agent initialized')
+
+  } else if (integrationMode === 'cli-codebuddy') {
     // Initialize CLI-based CodeBuddy agent
-    console.log('Initializing CodeBuddy CLI Agent...')
+    console.log('[main] Initializing CodeBuddy CLI Agent...')
     agent = new CLIAgentRuntime(mainWin)
     if (floatingBallWin) {
       agent.addWindow(floatingBallWin)
     }
     (global as Record<string, unknown>).agent = agent
-    agent.initialize().catch(err => console.error('CodeBuddy CLI initialization failed:', err))
-    console.log('CodeBuddy CLI Agent initialized')
+    agent.initialize().catch(err => console.error('[main] CodeBuddy CLI initialization failed:', err))
+    console.log('[main] CodeBuddy CLI Agent initialized')
+    
   } else {
     // Initialize API-based agent (default)
     if (apiKey) {
+      console.log('[main] Initializing API Agent...')
+      console.log('[main] Model:', configStore.getModel())
+      console.log('[main] API URL:', configStore.getApiUrl())
+      
       agent = new AgentRuntime(apiKey, mainWin, configStore.getModel(), configStore.getApiUrl())
       if (floatingBallWin) {
         agent.addWindow(floatingBallWin)
       }
       (global as Record<string, unknown>).agent = agent
-      agent.initialize().catch(err => console.error('Agent initialization failed:', err))
-      console.log('Agent initialized with model:', configStore.getModel())
-      console.log('API URL:', configStore.getApiUrl())
+      agent.initialize().catch(err => console.error('[main] Agent initialization failed:', err))
+      console.log('[main] API Agent initialized')
     } else {
-      console.warn('No API Key found. Please configure in Settings.')
+      console.warn('[main] No API Key found. Please configure in Settings.')
     }
   }
 }
@@ -496,7 +562,7 @@ function createTray() {
     tray = new Tray(blankIcon)
   }
 
-  tray.setToolTip('OpenCowork')
+  tray.setToolTip('CodeBuddy Code Cowork')
 
   const contextMenu = Menu.buildFromTemplate([
     {
@@ -565,6 +631,37 @@ function createMainWindow() {
     }
   })
 
+  // Handle render process crash - auto recover
+  mainWin.webContents.on('render-process-gone', (event, details) => {
+    console.error('[Main] Render process gone:', details.reason)
+    if (details.reason !== 'clean-exit' && mainWin && !mainWin.isDestroyed()) {
+      console.log('[Main] Attempting to reload main window...')
+      setTimeout(() => {
+        try {
+          if (mainWin && !mainWin.isDestroyed()) {
+            mainWin.reload()
+          }
+        } catch (err) {
+          console.error('[Main] Failed to reload:', err)
+        }
+      }, 1000)
+    }
+  })
+
+  // Handle crashes
+  mainWin.webContents.on('crashed', () => {
+    console.error('[Main] Main window crashed, reloading...')
+    setTimeout(() => {
+      try {
+        if (mainWin && !mainWin.isDestroyed()) {
+          mainWin.reload()
+        }
+      } catch (err) {
+        console.error('[Main] Failed to reload after crash:', err)
+      }
+    }, 1000)
+  })
+
   mainWin.webContents.on('did-finish-load', () => {
     mainWin?.webContents.send('main-process-message', (new Date).toLocaleString())
   })
@@ -594,6 +691,37 @@ function createFloatingBallWindow() {
       preload: path.join(__dirname, 'preload.mjs'),
     },
     icon: path.join(process.env.VITE_PUBLIC, 'icon.png'),
+  })
+
+  // Handle render process crash - auto recover
+  floatingBallWin.webContents.on('render-process-gone', (event, details) => {
+    console.error('[Main] Floating ball render process gone:', details.reason)
+    if (details.reason !== 'clean-exit' && floatingBallWin && !floatingBallWin.isDestroyed()) {
+      console.log('[Main] Attempting to reload floating ball...')
+      setTimeout(() => {
+        try {
+          if (floatingBallWin && !floatingBallWin.isDestroyed()) {
+            floatingBallWin.reload()
+          }
+        } catch (err) {
+          console.error('[Main] Failed to reload floating ball:', err)
+        }
+      }, 1000)
+    }
+  })
+
+  // Handle crashes
+  floatingBallWin.webContents.on('crashed', () => {
+    console.error('[Main] Floating ball crashed, reloading...')
+    setTimeout(() => {
+      try {
+        if (floatingBallWin && !floatingBallWin.isDestroyed()) {
+          floatingBallWin.reload()
+        }
+      } catch (err) {
+        console.error('[Main] Failed to reload floating ball after crash:', err)
+      }
+    }, 1000)
   })
 
   if (VITE_DEV_SERVER_URL) {

@@ -18,7 +18,7 @@
   "license": "Apache-2.0",
   "type": "module",
   "scripts": {
-    "dev": "chcp 65001 && vite",
+    "dev": "vite",
     "build": "tsc && vite build && electron-builder",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives",
     "preview": "vite preview"
@@ -26,6 +26,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.71.2",
     "@modelcontextprotocol/sdk": "^1.25.2",
+    "@tencent-ai/agent-sdk": "^0.1.27",
     "@types/react-syntax-highlighter": "^15.5.13",
     "clsx": "^2.1.1",
     "dotenv": "^17.2.3",

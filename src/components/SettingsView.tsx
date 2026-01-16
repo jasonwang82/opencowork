@@ -225,15 +225,18 @@ export function SettingsView({ onClose }: SettingsViewProps) {
                                     <label className="block text-xs font-medium text-stone-500 mb-1.5">{t('integrationMode')}</label>
                                     <select
                                         value={config.integrationMode}
-                                        onChange={(e) => setConfig({ ...config, integrationMode: e.target.value as 'api' | 'cli-codebuddy' })}
+                                        onChange={(e) => setConfig({ ...config, integrationMode: e.target.value as 'api' | 'cli-codebuddy' | 'sdk-codebuddy' })}
                                         className="w-full bg-white border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500"
                                     >
                                         <option value="api">{t('apiMode')}</option>
+                                        <option value="sdk-codebuddy">{t('sdkMode')}</option>
                                         <option value="cli-codebuddy">{t('cliMode')}</option>
                                     </select>
                                     <p className="text-xs text-stone-400 mt-1">
                                         {config.integrationMode === 'api' 
                                             ? t('apiModeDescription')
+                                            : config.integrationMode === 'sdk-codebuddy'
+                                            ? t('sdkModeDescription')
                                             : t('cliModeDescription')}
                                     </p>
                                 </div>
@@ -280,6 +283,16 @@ export function SettingsView({ onClose }: SettingsViewProps) {
                                             <li>{t('codeBuddyHelp')}</li>
                                             <li>{t('codeBuddyCompatible')}</li>
                                             <li>{t('codeBuddyEnvVars')}</li>
+                                        </ul>
+                                    </div>
+                                )}
+                                {config.integrationMode === 'sdk-codebuddy' && (
+                                    <div className="bg-blue-50 text-blue-700 rounded-lg p-3 text-xs space-y-2">
+                                        <p className="font-medium">{t('sdkModeInstructions')}</p>
+                                        <ul className="list-disc list-inside space-y-1">
+                                            <li>{t('sdkModeEnvVars')}</li>
+                                            <li>{t('sdkModeAutoAuth')}</li>
+                                            <li>{t('sdkModeRecommended')}</li>
                                         </ul>
                                     </div>
                                 )}
