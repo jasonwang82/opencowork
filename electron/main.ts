@@ -82,6 +82,9 @@ const BALL_SIZE = 64
 const EXPANDED_WIDTH = 340    // Match w-80 (320px) + padding
 const EXPANDED_HEIGHT = 320   // Compact height for less dramatic expansion
 
+// Debounce flag for new session
+let isCreatingSession = false
+
 app.on('before-quit', () => {
   app.isQuitting = true
 })
@@ -116,6 +119,15 @@ app.on('child-process-gone', (event, details) => {
 app.whenReady().then(() => {
   // Set App User Model ID for Windows notifications
   app.setAppUserModelId('com.opencowork.app')
+
+  // Set app icon for macOS dock
+  if (process.platform === 'darwin') {
+    const logoPath = path.join(process.env.VITE_PUBLIC || '', 'logo.png')
+    const appIcon = nativeImage.createFromPath(logoPath)
+    if (!appIcon.isEmpty()) {
+      app.dock.setIcon(appIcon)
+    }
+  }
 
   // Register Protocol Client
   if (app.isPackaged) {
@@ -158,7 +170,7 @@ app.whenReady().then(() => {
     mainWin?.show()
   }
 
-  console.log('CodeBuddy Code Cowork started. Press Alt+Space to toggle floating ball.')
+  console.log('CodeBuddy Work started. Press Alt+Space to toggle floating ball.')
 })
 
 
@@ -275,6 +287,10 @@ ipcMain.handle('config:set-all', (_, cfg) => {
   configStore.setNetworkAccess(cfg.networkAccess || false)
   if (cfg.shortcut) configStore.set('shortcut', cfg.shortcut)
   if (cfg.integrationMode) configStore.setIntegrationMode(cfg.integrationMode)
+  
+  // CodeBuddy specific settings
+  if (cfg.codeBuddyApiKey !== undefined) configStore.setCodeBuddyApiKey(cfg.codeBuddyApiKey)
+  if (cfg.codeBuddyInternetEnv !== undefined) configStore.setCodeBuddyInternetEnv(cfg.codeBuddyInternetEnv)
 
   // Reinitialize agent
   initializeAgent()
@@ -495,33 +511,51 @@ ipcMain.handle('skills:delete', async (_, skillId: string) => {
 
 
 function initializeAgent() {
-  const apiKey = configStore.getApiKey() || process.env.ANTHROPIC_API_KEY
-  const integrationMode = configStore.getIntegrationMode()
-  
-  console.log('[main] Initializing agent...')
-  console.log('[main] Integration mode:', integrationMode)
-
-  if (!mainWin) {
-    console.warn('[main] Main window not available for agent initialization')
-    return
-  }
-
-  if (integrationMode === 'sdk-codebuddy') {
-    // Initialize SDK-based CodeBuddy agent
-    const codeBuddyApiKey = configStore.getCodeBuddyApiKey()
-    const codeBuddyInternetEnv = configStore.getCodeBuddyInternetEnv()
+  try {
+    const apiKey = configStore.getApiKey() || process.env.ANTHROPIC_API_KEY
+    const integrationMode = configStore.getIntegrationMode()
     
-    console.log('[main] Initializing CodeBuddy SDK Agent...')
-    console.log('[main] CodeBuddy API Key:', codeBuddyApiKey ? '***' + codeBuddyApiKey.slice(-8) : 'NOT SET')
-    console.log('[main] CodeBuddy Internet Env:', codeBuddyInternetEnv || 'NOT SET')
+    console.log('[main] Initializing agent...')
+    console.log('[main] Integration mode:', integrationMode)
 
-    agent = new CodeBuddySDKRuntime(mainWin, codeBuddyApiKey, codeBuddyInternetEnv)
-    if (floatingBallWin) {
-      agent.addWindow(floatingBallWin)
+    if (!mainWin) {
+      console.warn('[main] Main window not available for agent initialization')
+      return
     }
-    (global as Record<string, unknown>).agent = agent
-    agent.initialize().catch(err => console.error('[main] CodeBuddy SDK initialization failed:', err))
-    console.log('[main] CodeBuddy SDK Agent initialized')
+
+    // Inject CodeBuddy environment variables from stored config (UI values take priority)
+    try {
+      const storedApiKey = configStore.getCodeBuddyApiKey()
+      const storedInternetEnv = configStore.getCodeBuddyInternetEnv()
+      
+      if (storedApiKey && storedApiKey.trim() !== '') {
+        process.env.CODEBUDDY_API_KEY = storedApiKey
+        console.log('[main] Injected CODEBUDDY_API_KEY from stored config')
+      }
+      if (storedInternetEnv && storedInternetEnv.trim() !== '') {
+        process.env.CODEBUDDY_INTERNET_ENVIRONMENT = storedInternetEnv
+        console.log('[main] Injected CODEBUDDY_INTERNET_ENVIRONMENT:', storedInternetEnv)
+      }
+    } catch (envErr) {
+      console.error('[main] Failed to inject CodeBuddy env vars:', envErr)
+    }
+
+    if (integrationMode === 'sdk-codebuddy') {
+      // Initialize SDK-based CodeBuddy agent
+      const codeBuddyApiKey = configStore.getCodeBuddyApiKey()
+      const codeBuddyInternetEnv = configStore.getCodeBuddyInternetEnv()
+      
+      console.log('[main] Initializing CodeBuddy SDK Agent...')
+      console.log('[main] CodeBuddy API Key:', codeBuddyApiKey ? '***' + codeBuddyApiKey.slice(-8) : 'NOT SET')
+      console.log('[main] CodeBuddy Internet Env:', codeBuddyInternetEnv || 'NOT SET')
+
+      agent = new CodeBuddySDKRuntime(mainWin, codeBuddyApiKey, codeBuddyInternetEnv)
+      if (floatingBallWin) {
+        agent.addWindow(floatingBallWin)
+      }
+      (global as Record<string, unknown>).agent = agent
+      agent.initialize().catch(err => console.error('[main] CodeBuddy SDK initialization failed:', err))
+      console.log('[main] CodeBuddy SDK Agent initialized')
 
   } else if (integrationMode === 'cli-codebuddy') {
     // Initialize CLI-based CodeBuddy agent
@@ -552,17 +586,32 @@ function initializeAgent() {
       console.warn('[main] No API Key found. Please configure in Settings.')
     }
   }
+  } catch (err) {
+    console.error('[main] Critical error during agent initialization:', err)
+    // Don't crash the app, just log the error
+  }
 }
 
 function createTray() {
   try {
-    tray = new Tray(path.join(process.env.VITE_PUBLIC || '', 'icon.png'))
+    const logoPath = path.join(process.env.VITE_PUBLIC || '', 'logo.png')
+    let trayIcon = nativeImage.createFromPath(logoPath)
+    
+    // Resize for macOS menu bar (16x16 is standard, use 32x32 for Retina)
+    if (process.platform === 'darwin') {
+      trayIcon = trayIcon.resize({ width: 18, height: 18 })
+    } else {
+      trayIcon = trayIcon.resize({ width: 20, height: 20 })
+    }
+    
+    tray = new Tray(trayIcon)
   } catch (e) {
+    console.error('[Main] Failed to create tray icon:', e)
     const blankIcon = nativeImage.createEmpty()
     tray = new Tray(blankIcon)
   }
 
-  tray.setToolTip('CodeBuddy Code Cowork')
+  tray.setToolTip('CodeBuddy Work')
 
   const contextMenu = Menu.buildFromTemplate([
     {
@@ -603,14 +652,21 @@ function createTray() {
 }
 
 function createMainWindow() {
+  // Platform-specific window options
+  const isMac = process.platform === 'darwin'
+  
   mainWin = new BrowserWindow({
     width: 480,
     height: 720,
     minWidth: 400,
     minHeight: 600,
-    icon: path.join(process.env.VITE_PUBLIC || '', 'icon.png'),
+    icon: path.join(process.env.VITE_PUBLIC || '', 'logo.png'),
     frame: false,
-    titleBarStyle: 'hiddenInset',
+    // On macOS: use hiddenInset for native traffic lights
+    // On Windows/Linux: completely frameless, custom controls in renderer
+    titleBarStyle: isMac ? 'hiddenInset' : 'default',
+    // Add extra space for traffic lights on macOS
+    trafficLightPosition: isMac ? { x: 12, y: 12 } : undefined,
     webPreferences: {
       preload: path.join(__dirname, 'preload.mjs'),
     },
@@ -690,7 +746,7 @@ function createFloatingBallWindow() {
     webPreferences: {
       preload: path.join(__dirname, 'preload.mjs'),
     },
-    icon: path.join(process.env.VITE_PUBLIC, 'icon.png'),
+    icon: path.join(process.env.VITE_PUBLIC, 'logo.png'),
   })
 
   // Handle render process crash - auto recover

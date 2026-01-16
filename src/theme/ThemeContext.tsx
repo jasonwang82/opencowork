@@ -15,7 +15,7 @@ export const ThemeContext = createContext<ThemeContextType | null>(null);
 
 const accentColors: Record<AccentColor, { primary: string; ring: string }> = {
     blue: { primary: '217 91% 60%', ring: '217 91% 60%' },
-    purple: { primary: '262 83% 58%', ring: '262 83% 58%' },
+    purple: { primary: '245 83% 62%', ring: '245 83% 62%' },
     green: { primary: '142 71% 45%', ring: '142 71% 45%' },
     orange: { primary: '25 95% 53%', ring: '25 95% 53%' },
     pink: { primary: '330 81% 60%', ring: '330 81% 60%' },
@@ -33,7 +33,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
         if (['blue', 'purple', 'green', 'orange', 'pink'].includes(saved || '')) {
             return saved as AccentColor;
         }
-        return 'blue';
+        return 'purple';
     });
 
     const [isDark, setIsDark] = useState(false);

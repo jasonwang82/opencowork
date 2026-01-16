@@ -60,7 +60,7 @@ export function SkillEditor({ filename, readOnly = false, onClose, onSave }: Ski
                             onChange={(e) => setName(e.target.value)}
                             disabled={!!filename || readOnly} // Disable if editing existing or read-only
                             placeholder="my-cool-skill"
-                            className="w-full bg-white border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500 disabled:bg-stone-50 disabled:text-stone-500"
+                            className="w-full bg-white border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500 disabled:bg-stone-50 disabled:text-stone-500"
                         />
                     </div>
 
@@ -70,7 +70,7 @@ export function SkillEditor({ filename, readOnly = false, onClose, onSave }: Ski
                             value={content}
                             onChange={(e) => setContent(e.target.value)}
                             disabled={readOnly}
-                            className="flex-1 w-full bg-stone-50 border border-stone-200 rounded-lg p-4 font-mono text-xs focus:outline-none focus:border-orange-500 resize-none disabled:text-stone-500"
+                            className="flex-1 w-full bg-stone-50 border border-stone-200 rounded-lg p-4 font-mono text-xs focus:outline-none focus:border-brand-500 resize-none disabled:text-stone-500"
                             spellCheck={false}
                         />
                     </div>
@@ -86,7 +86,7 @@ export function SkillEditor({ filename, readOnly = false, onClose, onSave }: Ski
                     {!readOnly && (
                         <button
                             onClick={handleSave}
-                            className="px-4 py-2 bg-orange-500 text-white rounded-lg text-sm font-medium hover:bg-orange-600 transition-colors shadow-sm cursor-pointer"
+                            className="px-4 py-2 bg-brand-500 text-white rounded-lg text-sm font-medium hover:bg-brand-600 transition-colors shadow-sm cursor-pointer"
                         >
                             保存技能
                         </button>

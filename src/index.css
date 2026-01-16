@@ -13,7 +13,7 @@
     --card: 0 0% 100%;
     --card-foreground: 24 10% 10%;
 
-    --primary: 24 95% 53%;
+    --primary: 245 83% 62%;
     --primary-foreground: 0 0% 100%;
 
     --secondary: 30 20% 94%;
@@ -30,7 +30,7 @@
 
     --border: 30 15% 88%;
     --input: 30 15% 88%;
-    --ring: 24 95% 53%;
+    --ring: 245 83% 62%;
 
     --radius: 0.75rem;
   }
@@ -42,7 +42,7 @@
     --card: 0 0% 10%;
     --card-foreground: 0 0% 95%;
 
-    --primary: 24 95% 53%;
+    --primary: 245 83% 62%;
     --primary-foreground: 0 0% 100%;
 
     --secondary: 0 0% 15%;
@@ -59,7 +59,7 @@
 
     --border: 0 0% 18%;
     --input: 0 0% 18%;
-    --ring: 24 95% 53%;
+    --ring: 245 83% 62%;
   }
 }
 
@@ -104,7 +104,7 @@
 
   .input-bar {
     @apply bg-white border border-stone-200 rounded-xl flex items-center shadow-sm transition-all;
-    @apply focus-within:border-stone-300 focus-within:ring-2 focus-within:ring-orange-100;
+    @apply focus-within:border-stone-300 focus-within:ring-2 focus-within:ring-brand-100;
   }
 
   .input-bar-dark {

@@ -125,7 +125,7 @@ export function MarkdownRenderer({ content, className = '', isDark = false }: Ma
                     },
                     h2({ children }) {
                         return <h2 className="text-lg font-bold mt-6 mb-3 text-stone-900 flex items-center gap-2">
-                            <span className="w-1 h-5 bg-orange-500 rounded-full inline-block"></span>
+                            <span className="w-1 h-5 bg-brand-500 rounded-full inline-block"></span>
                             {children}
                         </h2>;
                     },
@@ -133,10 +133,10 @@ export function MarkdownRenderer({ content, className = '', isDark = false }: Ma
                         return <h3 className="text-base font-semibold mt-4 mb-2 text-stone-800">{children}</h3>;
                     },
                     blockquote({ children }) {
-                        return <blockquote className="border-l-4 border-orange-200 pl-4 py-1 my-4 text-stone-600 italic bg-orange-50/30 rounded-r-lg">{children}</blockquote>;
+                        return <blockquote className="border-l-4 border-brand-200 pl-4 py-1 my-4 text-stone-600 italic bg-brand-50/30 rounded-r-lg">{children}</blockquote>;
                     },
                     a({ href, children }) {
-                        return <a href={href} className="text-orange-600 hover:text-orange-700 underline decoration-orange-300 hover:decoration-orange-600 underline-offset-2 transition-all font-medium" target="_blank" rel="noopener noreferrer">{children}</a>
+                        return <a href={href} className="text-brand-600 hover:text-brand-700 underline decoration-brand-300 hover:decoration-brand-600 underline-offset-2 transition-all font-medium" target="_blank" rel="noopener noreferrer">{children}</a>
                     }
                 }}
             >

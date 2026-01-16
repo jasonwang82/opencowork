@@ -77,6 +77,11 @@ export const translations = {
         sdkModeEnvVars: 'Set CODEBUDDY_API_KEY and CODEBUDDY_INTERNET_ENVIRONMENT environment variables',
         sdkModeAutoAuth: 'Or use existing login credentials from codebuddy CLI',
         sdkModeRecommended: 'This mode provides better integration and streaming support',
+        codeBuddyApiKey: 'CodeBuddy API Key',
+        codeBuddyApiKeyPlaceholder: 'Enter your CodeBuddy API Key',
+        codeBuddyApiKeyHint: 'Your CodeBuddy API key for SDK authentication',
+        codeBuddyInternetEnv: 'Internet Environment',
+        codeBuddyInternetEnvHint: 'Network environment setting (default: ioa)',
         modelName: 'Model Name',
         modelNameDescription: 'Enter model name, e.g., MiniMax-M2.1',
 
@@ -168,6 +173,11 @@ export const translations = {
         sdkModeEnvVars: '需设置 CODEBUDDY_API_KEY 和 CODEBUDDY_INTERNET_ENVIRONMENT 环境变量',
         sdkModeAutoAuth: '或使用 codebuddy CLI 的登录凭据自动认证',
         sdkModeRecommended: '此模式提供更好的集成和流式响应支持',
+        codeBuddyApiKey: 'CodeBuddy API Key',
+        codeBuddyApiKeyPlaceholder: '请输入您的 CodeBuddy API Key',
+        codeBuddyApiKeyHint: '用于 SDK 认证的 CodeBuddy API 密钥',
+        codeBuddyInternetEnv: '网络环境',
+        codeBuddyInternetEnvHint: '网络环境设置（默认：ioa）',
         modelName: '模型名称',
         modelNameDescription: '输入模型名称，如 MiniMax-M2.1',
 

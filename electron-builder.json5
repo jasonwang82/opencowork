@@ -3,7 +3,8 @@
   "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
   "appId": "com.opencowork.app",
   "asar": true,
-  "productName": "OpenCowork",
+  "productName": "CodeBuddy Work",
+  "icon": "logo.png",
 
   "directories": {
     "output": "release/${version}"
@@ -22,6 +23,7 @@
     "target": [
       "dmg"
     ],
+    "icon": "logo.png",
     "artifactName": "${productName}-Mac-${version}-Installer.${ext}"
   },
   "win": {
@@ -33,6 +35,7 @@
         ]
       }
     ],
+    "icon": "logo.png",
     "artifactName": "${productName}-Windows-${version}-Setup.${ext}"
   },
   "nsis": {
@@ -46,6 +49,7 @@
       "AppImage",
       "deb"
     ],
+    "icon": "logo.png",
     "maintainer": "Safphere <a976466014@gmail.com>",
     "category": "Utility",
     "artifactName": "${productName}-Linux-${version}.${ext}"

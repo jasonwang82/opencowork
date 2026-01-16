@@ -150,6 +150,7 @@ export class AgentRuntime {
             this.isProcessing = false;
             this.abortController = null;
             this.notifyUpdate();
+            this.broadcast('agent:complete', null);
         }
     }
 

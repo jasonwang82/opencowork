@@ -17,6 +17,8 @@ export interface AppConfig {
     shortcut: string;
     allowedPermissions: ToolPermission[];
     integrationMode: IntegrationMode;
+    codeBuddyApiKey: string;
+    codeBuddyInternetEnv: string;
 }
 
 const defaults: AppConfig = {
@@ -27,7 +29,9 @@ const defaults: AppConfig = {
     networkAccess: true, // "Open and use" implies network should be on
     shortcut: 'Alt+Space',
     allowedPermissions: [],
-    integrationMode: 'cli-codebuddy'
+    integrationMode: 'cli-codebuddy',
+    codeBuddyApiKey: '',
+    codeBuddyInternetEnv: 'ioa'
 };
 
 class ConfigStore {
@@ -158,13 +162,29 @@ class ConfigStore {
         this.store.set('integrationMode', mode);
     }
 
-    // CodeBuddy specific
+    // CodeBuddy specific - UI values take priority over environment variables
     getCodeBuddyApiKey(): string {
-        return process.env.CODEBUDDY_API_KEY || this.store.get('apiKey') || '';
+        const storedKey = this.store.get('codeBuddyApiKey');
+        if (storedKey && storedKey.trim() !== '') {
+            return storedKey;
+        }
+        return process.env.CODEBUDDY_API_KEY || '';
+    }
+
+    setCodeBuddyApiKey(key: string): void {
+        this.store.set('codeBuddyApiKey', key);
     }
 
     getCodeBuddyInternetEnv(): string {
-        return process.env.CODEBUDDY_INTERNET_ENVIRONMENT || '';
+        const storedEnv = this.store.get('codeBuddyInternetEnv');
+        if (storedEnv && storedEnv.trim() !== '') {
+            return storedEnv;
+        }
+        return process.env.CODEBUDDY_INTERNET_ENVIRONMENT || 'ioa';
+    }
+
+    setCodeBuddyInternetEnv(env: string): void {
+        this.store.set('codeBuddyInternetEnv', env);
     }
 }
 

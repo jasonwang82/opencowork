@@ -9,8 +9,16 @@ export interface IpcRendererApi {
     invoke(channel: string, ...args: unknown[]): Promise<unknown>;
 }
 
+export interface PlatformInfo {
+    isMac: boolean;
+    isWindows: boolean;
+    isLinux: boolean;
+    name: string;
+}
+
 declare global {
     interface Window {
-        ipcRenderer: IpcRendererApi
+        ipcRenderer: IpcRendererApi;
+        platform: PlatformInfo;
     }
 }

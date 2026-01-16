@@ -16,6 +16,8 @@ interface Config {
     networkAccess: boolean;
     shortcut: string;
     integrationMode: IntegrationMode;
+    codeBuddyApiKey: string;
+    codeBuddyInternetEnv: string;
 }
 
 interface SkillInfo {
@@ -40,7 +42,9 @@ export function SettingsView({ onClose }: SettingsViewProps) {
         authorizedFolders: [],
         networkAccess: false,
         shortcut: 'Alt+Space',
-        integrationMode: 'api'
+        integrationMode: 'api',
+        codeBuddyApiKey: '',
+        codeBuddyInternetEnv: 'ioa'
     });
     const [saved, setSaved] = useState(false);
     const [activeTab, setActiveTab] = useState<'api' | 'folders' | 'mcp' | 'skills' | 'advanced'>('api');
@@ -177,7 +181,7 @@ export function SettingsView({ onClose }: SettingsViewProps) {
                                 disabled={saved}
                                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${saved
                                     ? 'bg-green-100 text-green-600'
-                                    : 'bg-orange-500 text-white hover:bg-orange-600'
+                                    : 'bg-brand-500 text-white hover:bg-brand-600'
                                     }`}
                             >
                                 {saved ? <Check size={14} /> : null}
@@ -206,7 +210,7 @@ export function SettingsView({ onClose }: SettingsViewProps) {
                             key={tab.id}
                             onClick={() => setActiveTab(tab.id)}
                             className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors whitespace-nowrap ${activeTab === tab.id
-                                ? 'text-orange-500 border-b-2 border-orange-500 bg-orange-50/50'
+                                ? 'text-brand-500 border-b-2 border-brand-500 bg-brand-50/50'
                                 : 'text-stone-500 hover:text-stone-700 hover:bg-stone-50'
                                 }`}
                         >
@@ -226,7 +230,7 @@ export function SettingsView({ onClose }: SettingsViewProps) {
                                     <select
                                         value={config.integrationMode}
                                         onChange={(e) => setConfig({ ...config, integrationMode: e.target.value as 'api' | 'cli-codebuddy' | 'sdk-codebuddy' })}
-                                        className="w-full bg-white border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500"
+                                        className="w-full bg-white border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500"
                                     >
                                         <option value="api">{t('apiMode')}</option>
                                         <option value="sdk-codebuddy">{t('sdkMode')}</option>
@@ -249,7 +253,7 @@ export function SettingsView({ onClose }: SettingsViewProps) {
                                                 value={config.apiKey}
                                                 onChange={(e) => setConfig({ ...config, apiKey: e.target.value })}
                                                 placeholder="sk-..."
-                                                className="w-full bg-white border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500"
+                                                className="w-full bg-white border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500"
                                             />
                                         </div>
                                         <div>
@@ -259,7 +263,7 @@ export function SettingsView({ onClose }: SettingsViewProps) {
                                                 value={config.apiUrl}
                                                 onChange={(e) => setConfig({ ...config, apiUrl: e.target.value })}
                                                 placeholder="https://api.anthropic.com"
-                                                className="w-full bg-white border border-stone-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500"
+                                                className="w-full bg-white border border-stone-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500"
                                             />
                                         </div>
                                         <div>
@@ -269,32 +273,82 @@ export function SettingsView({ onClose }: SettingsViewProps) {
                                                 value={config.model}
                                                 onChange={(e) => setConfig({ ...config, model: e.target.value })}
                                                 placeholder="glm-4.7"
-                                                className="w-full bg-white border border-stone-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500"
+                                                className="w-full bg-white border border-stone-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500"
                                             />
                                             <p className="text-xs text-stone-400 mt-1">{t('modelNameDescription')}</p>
                                         </div>
                                     </>
                                 )}
                                 {config.integrationMode === 'cli-codebuddy' && (
-                                    <div className="bg-amber-50 text-amber-700 rounded-lg p-3 text-xs space-y-2">
-                                        <p className="font-medium">{t('codeBuddyInstructions')}</p>
-                                        <ul className="list-disc list-inside space-y-1">
-                                            <li>{t('codeBuddyInstallRequired')}</li>
-                                            <li>{t('codeBuddyHelp')}</li>
-                                            <li>{t('codeBuddyCompatible')}</li>
-                                            <li>{t('codeBuddyEnvVars')}</li>
-                                        </ul>
-                                    </div>
+                                    <>
+                                        <div>
+                                            <label className="block text-xs font-medium text-stone-500 mb-1.5">{t('codeBuddyApiKey')}</label>
+                                            <input
+                                                type="password"
+                                                value={config.codeBuddyApiKey}
+                                                onChange={(e) => setConfig({ ...config, codeBuddyApiKey: e.target.value })}
+                                                placeholder={t('codeBuddyApiKeyPlaceholder')}
+                                                className="w-full bg-white border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500"
+                                            />
+                                            <p className="text-xs text-stone-400 mt-1">{t('codeBuddyApiKeyHint')}</p>
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-medium text-stone-500 mb-1.5">{t('codeBuddyInternetEnv')}</label>
+                                            <select
+                                                value={config.codeBuddyInternetEnv}
+                                                onChange={(e) => setConfig({ ...config, codeBuddyInternetEnv: e.target.value })}
+                                                className="w-full bg-white border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500"
+                                            >
+                                                <option value="ioa">ioa (内网)</option>
+                                                <option value="public">public (外网)</option>
+                                            </select>
+                                            <p className="text-xs text-stone-400 mt-1">{t('codeBuddyInternetEnvHint')}</p>
+                                        </div>
+                                        <div className="bg-amber-50 text-amber-700 rounded-lg p-3 text-xs space-y-2">
+                                            <p className="font-medium">{t('codeBuddyInstructions')}</p>
+                                            <ul className="list-disc list-inside space-y-1">
+                                                <li>{t('codeBuddyInstallRequired')}</li>
+                                                <li>{t('codeBuddyHelp')}</li>
+                                                <li>{t('codeBuddyCompatible')}</li>
+                                                <li>{t('codeBuddyEnvVars')}</li>
+                                            </ul>
+                                        </div>
+                                    </>
                                 )}
                                 {config.integrationMode === 'sdk-codebuddy' && (
-                                    <div className="bg-blue-50 text-blue-700 rounded-lg p-3 text-xs space-y-2">
-                                        <p className="font-medium">{t('sdkModeInstructions')}</p>
-                                        <ul className="list-disc list-inside space-y-1">
-                                            <li>{t('sdkModeEnvVars')}</li>
-                                            <li>{t('sdkModeAutoAuth')}</li>
-                                            <li>{t('sdkModeRecommended')}</li>
-                                        </ul>
-                                    </div>
+                                    <>
+                                        <div>
+                                            <label className="block text-xs font-medium text-stone-500 mb-1.5">{t('codeBuddyApiKey')}</label>
+                                            <input
+                                                type="password"
+                                                value={config.codeBuddyApiKey}
+                                                onChange={(e) => setConfig({ ...config, codeBuddyApiKey: e.target.value })}
+                                                placeholder={t('codeBuddyApiKeyPlaceholder')}
+                                                className="w-full bg-white border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500"
+                                            />
+                                            <p className="text-xs text-stone-400 mt-1">{t('codeBuddyApiKeyHint')}</p>
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-medium text-stone-500 mb-1.5">{t('codeBuddyInternetEnv')}</label>
+                                            <select
+                                                value={config.codeBuddyInternetEnv}
+                                                onChange={(e) => setConfig({ ...config, codeBuddyInternetEnv: e.target.value })}
+                                                className="w-full bg-white border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500"
+                                            >
+                                                <option value="ioa">ioa (内网)</option>
+                                                <option value="public">public (外网)</option>
+                                            </select>
+                                            <p className="text-xs text-stone-400 mt-1">{t('codeBuddyInternetEnvHint')}</p>
+                                        </div>
+                                        <div className="bg-blue-50 text-blue-700 rounded-lg p-3 text-xs space-y-2">
+                                            <p className="font-medium">{t('sdkModeInstructions')}</p>
+                                            <ul className="list-disc list-inside space-y-1">
+                                                <li>{t('sdkModeEnvVars')}</li>
+                                                <li>{t('sdkModeAutoAuth')}</li>
+                                                <li>{t('sdkModeRecommended')}</li>
+                                            </ul>
+                                        </div>
+                                    </>
                                 )}
                             </>
                         )}
@@ -335,7 +389,7 @@ export function SettingsView({ onClose }: SettingsViewProps) {
 
                                 <button
                                     onClick={addFolder}
-                                    className="w-full py-2.5 border border-dashed border-stone-300 text-stone-500 hover:text-orange-600 hover:border-orange-500 hover:bg-orange-50 rounded-xl transition-all flex items-center justify-center gap-2 text-sm"
+                                    className="w-full py-2.5 border border-dashed border-stone-300 text-stone-500 hover:text-brand-600 hover:border-brand-500 hover:bg-brand-50 rounded-xl transition-all flex items-center justify-center gap-2 text-sm"
                                 >
                                     <Plus size={16} />
                                     添加文件夹
@@ -358,7 +412,7 @@ export function SettingsView({ onClose }: SettingsViewProps) {
                                 <textarea
                                     value={mcpConfig}
                                     onChange={(e) => setMcpConfig(e.target.value)}
-                                    className="w-full h-[320px] bg-white border border-stone-200 rounded-lg p-3 font-mono text-xs focus:outline-none focus:border-orange-500 resize-none text-stone-700"
+                                    className="w-full h-[320px] bg-white border border-stone-200 rounded-lg p-3 font-mono text-xs focus:outline-none focus:border-brand-500 resize-none text-stone-700"
                                     placeholder='{ "mcpServers": { ... } }'
                                     spellCheck={false}
                                 />
@@ -378,7 +432,7 @@ export function SettingsView({ onClose }: SettingsViewProps) {
                                             setEditingSkill(null);
                                             setShowSkillEditor(true);
                                         }}
-                                        className="flex items-center gap-1 text-xs px-2 py-1 bg-orange-500 text-white rounded hover:bg-orange-600 transition-colors"
+                                        className="flex items-center gap-1 text-xs px-2 py-1 bg-brand-500 text-white rounded hover:bg-brand-600 transition-colors"
                                     >
                                         <Plus size={12} />
                                         新建技能
@@ -394,10 +448,10 @@ export function SettingsView({ onClose }: SettingsViewProps) {
                                         {skills.map((skill) => (
                                             <div
                                                 key={skill.id}
-                                                className="flex items-center justify-between p-3 bg-white border border-stone-200 rounded-lg hover:border-orange-200 transition-colors group"
+                                                className="flex items-center justify-between p-3 bg-white border border-stone-200 rounded-lg hover:border-brand-200 transition-colors group"
                                             >
                                                 <div className="flex items-center gap-3">
-                                                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${skill.isBuiltin ? 'bg-orange-50 text-orange-600' : 'bg-purple-50 text-purple-600'}`}>
+                                                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${skill.isBuiltin ? 'bg-brand-50 text-brand-600' : 'bg-purple-50 text-purple-600'}`}>
                                                         <Zap size={16} />
                                                     </div>
                                                     <div>
@@ -463,7 +517,7 @@ export function SettingsView({ onClose }: SettingsViewProps) {
                                         <input
                                             type="text"
                                             autoFocus
-                                            className="px-3 py-1.5 text-sm border border-orange-400 rounded-lg bg-orange-50 text-orange-600 font-medium outline-none animate-pulse"
+                                            className="px-3 py-1.5 text-sm border border-brand-400 rounded-lg bg-brand-50 text-brand-600 font-medium outline-none animate-pulse"
                                             placeholder="按下快捷键..."
                                             onKeyDown={handleShortcutKeyDown}
                                             onBlur={() => setIsRecordingShortcut(false)}

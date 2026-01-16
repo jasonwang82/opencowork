@@ -273,12 +273,14 @@ export class CLIAgentRuntime {
                         // Success - update final assistant response in history
                         assistantMessage.content = finalResult || 'Command executed successfully.';
                         this.notifyUpdate();
+                        this.broadcast('agent:complete', null);
                         resolve();
                     } else {
                         // Error - remove the empty assistant message and show error
                         this.removeMessageFromHistory(assistantMessage);
                         const errorMessage = stderrBuffer || `CodeBuddy process exited with code ${code}`;
                         this.broadcast('agent:error', errorMessage);
+                        this.broadcast('agent:complete', null);
                         this.notifyUpdate();
                         reject(new Error(errorMessage));
                     }
@@ -313,7 +315,7 @@ export class CLIAgentRuntime {
                 // System initialization - broadcast start
                 this.broadcast('agent:cli-progress', {
                     type: 'init',
-                    message: '正在初始化...',
+                    message: 'Thinking...',
                     model: (msg as unknown as { model?: string }).model
                 });
             } else if (msg.type === 'assistant' && msg.message?.content) {

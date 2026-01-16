@@ -229,6 +229,7 @@ export class CodeBuddySDKRuntime {
             this.isProcessing = false;
             this.currentQuery = null;
             this.notifyUpdate();
+            this.broadcast('agent:complete', null);
             console.log('[CodeBuddySDKRuntime] Processing finished');
         }
     }

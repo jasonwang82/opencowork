@@ -82,7 +82,7 @@ export function FloatingChat({
                     </div>
                     {/* Processing Indicator */}
                     {isProcessing && (
-                        <div className="absolute -top-1 -right-1 w-4 h-4 bg-orange-500 rounded-full animate-pulse border-2 border-white" />
+                        <div className="absolute -top-1 -right-1 w-4 h-4 bg-brand-500 rounded-full animate-pulse border-2 border-white" />
                     )}
                 </div>
             </div>
@@ -160,7 +160,7 @@ export function FloatingChat({
                                                     >
                                                         <div className="flex items-center gap-3">
                                                             {block.status === 'running' ? (
-                                                                <Loader2 size={14} className="animate-spin text-orange-500" />
+                                                                <Loader2 size={14} className="animate-spin text-brand-500" />
                                                             ) : block.status === 'done' ? (
                                                                 <Check size={14} className="text-green-500" />
                                                             ) : (
@@ -224,7 +224,7 @@ export function FloatingChat({
                                 type="submit"
                                 disabled={!input.trim() || isProcessing}
                                 className={`m-1.5 p-2.5 rounded-lg transition-all duration-200 ${input.trim() && !isProcessing
-                                        ? 'bg-orange-500 text-white shadow-md hover:bg-orange-600'
+                                        ? 'bg-brand-500 text-white shadow-md hover:bg-brand-600'
                                         : 'bg-stone-100 text-stone-300'
                                     }`}
                             >

@@ -19,6 +19,19 @@ function App() {
     const removeListener = window.ipcRenderer.on('agent:history-update', (_event, ...args) => {
       const updatedHistory = args[0] as Anthropic.MessageParam[];
       setHistory(updatedHistory);
+      // Only stop processing when the last message is a complete assistant response
+      // (not when user message is added or assistant is still streaming)
+      if (updatedHistory.length > 0) {
+        const lastMsg = updatedHistory[updatedHistory.length - 1];
+        if (lastMsg.role === 'assistant' && lastMsg.content && 
+            (typeof lastMsg.content === 'string' ? lastMsg.content.length > 0 : true)) {
+          setIsProcessing(false);
+        }
+      }
+    });
+
+    // Listen for explicit completion signal
+    const removeCompleteListener = window.ipcRenderer.on('agent:complete', () => {
       setIsProcessing(false);
     });
 
@@ -30,6 +43,7 @@ function App() {
 
     return () => {
       removeListener();
+      removeCompleteListener();
       removeErrorListener();
     };
   }, []);
@@ -58,43 +72,53 @@ function App() {
     return <FloatingBallPage />;
   }
 
+  // Platform detection
+  const isMac = window.platform?.isMac ?? false;
+
   // Main App - Narrow vertical layout
   return (
     <div className="h-screen w-full bg-[#FAF8F5] flex flex-col overflow-hidden font-sans">
       {/* Custom Titlebar */}
       <header
-        className="h-10 border-b border-stone-200/80 flex items-center justify-between px-3 bg-white/80 backdrop-blur-sm shrink-0"
-        style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
+        className="h-10 border-b border-stone-200/80 flex items-center justify-between bg-white/80 backdrop-blur-sm shrink-0"
+        style={{ 
+          WebkitAppRegion: 'drag',
+          // On macOS, add left padding for traffic lights
+          paddingLeft: isMac ? '78px' : '12px',
+          paddingRight: '12px'
+        } as React.CSSProperties}
       >
         <div className="flex items-center gap-2" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
-          <img src="/icon.png" alt="Logo" className="w-6 h-6 rounded-md object-cover" />
-          <span className="font-medium text-stone-700 text-sm">CodeBuddy Code Cowork</span>
+          <img src="/logo.png" alt="Logo" className="w-6 h-6 rounded-md object-cover" />
+          <span className="font-medium text-stone-700 text-sm">CodeBuddy Work</span>
         </div>
 
-        <div className="flex items-center gap-1" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
-          {/* Window Controls */}
-          <button
-            onClick={() => window.ipcRenderer.invoke('window:minimize')}
-            className="p-1.5 text-stone-400 hover:text-stone-600 hover:bg-stone-100 rounded transition-colors"
-            title="Minimize"
-          >
-            <Minus size={14} />
-          </button>
-          <button
-            onClick={() => window.ipcRenderer.invoke('window:maximize')}
-            className="p-1.5 text-stone-400 hover:text-stone-600 hover:bg-stone-100 rounded transition-colors"
-            title="Maximize"
-          >
-            <Square size={12} />
-          </button>
-          <button
-            onClick={() => window.ipcRenderer.invoke('window:close')}
-            className="p-1.5 text-stone-400 hover:text-stone-600 hover:bg-red-100 hover:text-red-500 rounded transition-colors"
-            title="Close"
-          >
-            <X size={14} />
-          </button>
-        </div>
+        {/* Window Controls - Only show on Windows/Linux */}
+        {!isMac && (
+          <div className="flex items-center gap-1" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+            <button
+              onClick={() => window.ipcRenderer.invoke('window:minimize')}
+              className="p-1.5 text-stone-400 hover:text-stone-600 hover:bg-stone-100 rounded transition-colors"
+              title="Minimize"
+            >
+              <Minus size={14} />
+            </button>
+            <button
+              onClick={() => window.ipcRenderer.invoke('window:maximize')}
+              className="p-1.5 text-stone-400 hover:text-stone-600 hover:bg-stone-100 rounded transition-colors"
+              title="Maximize"
+            >
+              <Square size={12} />
+            </button>
+            <button
+              onClick={() => window.ipcRenderer.invoke('window:close')}
+              className="p-1.5 text-stone-400 hover:text-stone-600 hover:bg-red-100 hover:text-red-500 rounded transition-colors"
+              title="Close"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        )}
       </header>
 
       {/* Main Content */}

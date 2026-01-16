@@ -29,7 +29,16 @@ interface IpcRendererApi {
   invoke(channel: string, ...args: unknown[]): Promise<unknown>;
 }
 
+// Platform information exposed via preload.ts
+interface PlatformInfo {
+  isMac: boolean;
+  isWindows: boolean;
+  isLinux: boolean;
+  name: string;
+}
+
 // Used in Renderer process, expose in `preload.ts`
 interface Window {
-  ipcRenderer: IpcRendererApi
+  ipcRenderer: IpcRendererApi;
+  platform: PlatformInfo;
 }

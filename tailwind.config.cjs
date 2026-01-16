@@ -7,6 +7,18 @@ module.exports = {
     theme: {
         extend: {
             colors: {
+                brand: {
+                    50: '#f0effe',
+                    100: '#e0dffd',
+                    200: '#c4c1fb',
+                    300: '#a19bf8',
+                    400: '#7b6ef4',
+                    500: '#5B4DF0',
+                    600: '#4a3de0',
+                    700: '#3d31c4',
+                    800: '#32299f',
+                    900: '#2b2680',
+                },
                 background: "hsl(var(--background))",
                 foreground: "hsl(var(--foreground))",
                 primary: {

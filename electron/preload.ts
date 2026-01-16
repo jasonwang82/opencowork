@@ -1,6 +1,15 @@
 import { ipcRenderer, contextBridge, IpcRendererEvent } from 'electron'
 
 // --------- Expose some API to the Renderer process ---------
+
+// Expose platform information
+contextBridge.exposeInMainWorld('platform', {
+  isMac: process.platform === 'darwin',
+  isWindows: process.platform === 'win32',
+  isLinux: process.platform === 'linux',
+  name: process.platform
+})
+
 contextBridge.exposeInMainWorld('ipcRenderer', {
   on(...args: Parameters<typeof ipcRenderer.on>) {
     const [channel, listener] = args

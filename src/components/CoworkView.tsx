@@ -49,6 +49,7 @@ export function CoworkView({ history, onSendMessage, onAbort, isProcessing, onOp
     const [permissionRequest, setPermissionRequest] = useState<PermissionRequest | null>(null);
     const [showHistory, setShowHistory] = useState(false);
     const [sessions, setSessions] = useState<SessionSummary[]>([]);
+    const [isCreatingSession, setIsCreatingSession] = useState(false);
     const scrollRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -253,7 +254,7 @@ export function CoworkView({ history, onSendMessage, onAbort, isProcessing, onOp
                             </button>
                             <button
                                 onClick={() => handlePermissionResponse(true)}
-                                className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-white bg-orange-500 hover:bg-orange-600 rounded-xl transition-colors"
+                                className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-white bg-brand-500 hover:bg-brand-600 rounded-xl transition-colors"
                             >
                                 <Check size={16} />
                                 允许
@@ -316,8 +317,19 @@ export function CoworkView({ history, onSendMessage, onAbort, isProcessing, onOp
                     )}
                     <div className="flex items-center gap-1">
                         <button
-                            onClick={() => window.ipcRenderer.invoke('agent:new-session')}
-                            className="p-1.5 text-stone-400 hover:text-stone-600 hover:bg-stone-100 rounded-lg transition-colors"
+                            onClick={async () => {
+                                if (isCreatingSession || isProcessing) return;
+                                setIsCreatingSession(true);
+                                try {
+                                    await window.ipcRenderer.invoke('agent:new-session');
+                                    setProgressMessages([]);
+                                    setStreamingText('');
+                                } finally {
+                                    setIsCreatingSession(false);
+                                }
+                            }}
+                            disabled={isCreatingSession || isProcessing}
+                            className={`p-1.5 text-stone-400 hover:text-stone-600 hover:bg-stone-100 rounded-lg transition-colors ${isCreatingSession ? 'opacity-50 cursor-not-allowed' : ''}`}
                             title="新会话"
                         >
                             <Plus size={16} />
@@ -345,7 +357,7 @@ export function CoworkView({ history, onSendMessage, onAbort, isProcessing, onOp
                 <div className="absolute top-12 right-6 z-20 w-80 bg-white rounded-xl shadow-xl border border-stone-200 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
                     <div className="flex items-center justify-between px-4 py-3 border-b border-stone-100 bg-stone-50/50">
                         <div className="flex items-center gap-2">
-                            <History size={14} className="text-orange-500" />
+                            <History size={14} className="text-brand-500" />
                             <span className="text-sm font-semibold text-stone-700">历史任务</span>
                         </div>
                         <button
@@ -366,7 +378,13 @@ export function CoworkView({ history, onSendMessage, onAbort, isProcessing, onOp
                                 {sessions.map((session) => (
                                     <div
                                         key={session.id}
-                                        className="group relative p-3 rounded-lg hover:bg-stone-50 transition-colors border border-transparent hover:border-stone-100"
+                                        className="group relative p-3 rounded-lg hover:bg-stone-50 transition-colors border border-transparent hover:border-stone-100 cursor-pointer"
+                                        onClick={() => {
+                                            window.ipcRenderer.invoke('session:load', session.id);
+                                            setProgressMessages([]);
+                                            setStreamingText('');
+                                            setShowHistory(false);
+                                        }}
                                     >
                                         <p className="text-xs font-medium text-stone-700 line-clamp-2 leading-relaxed">
                                             {session.title}
@@ -381,16 +399,20 @@ export function CoworkView({ history, onSendMessage, onAbort, isProcessing, onOp
                                         </p>
                                         <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                             <button
-                                                onClick={() => {
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
                                                     window.ipcRenderer.invoke('session:load', session.id);
+                                                    setProgressMessages([]);
+                                                    setStreamingText('');
                                                     setShowHistory(false);
                                                 }}
-                                                className="text-[10px] flex items-center gap-1 text-orange-500 hover:text-orange-600 bg-orange-50 px-2 py-0.5 rounded-full"
+                                                className="text-[10px] flex items-center gap-1 text-brand-500 hover:text-brand-600 bg-brand-50 px-2 py-0.5 rounded-full"
                                             >
                                                 加载
                                             </button>
                                             <button
-                                                onClick={async () => {
+                                                onClick={async (e) => {
+                                                    e.stopPropagation();
                                                     await window.ipcRenderer.invoke('session:delete', session.id);
                                                     setSessions(sessions.filter(s => s.id !== session.id));
                                                 }}
@@ -429,7 +451,7 @@ export function CoworkView({ history, onSendMessage, onAbort, isProcessing, onOp
                                 <div className="animate-in fade-in duration-200">
                                     <div className="text-stone-700 text-[15px] leading-7 max-w-none">
                                         <MarkdownRenderer content={streamingText} />
-                                        <span className="inline-block w-2 h-5 bg-orange-500 ml-0.5 animate-pulse" />
+                                        <span className="inline-block w-2 h-5 bg-brand-500 ml-0.5 animate-pulse" />
                                     </div>
                                 </div>
                             )}
@@ -474,7 +496,7 @@ export function CoworkView({ history, onSendMessage, onAbort, isProcessing, onOp
 
                     {isProcessing && !streamingText && progressMessages.length === 0 && (
                         <div className="flex items-center gap-2 text-stone-400 text-sm animate-pulse">
-                            <div className="w-1.5 h-1.5 bg-orange-500 rounded-full animate-bounce" />
+                            <div className="w-1.5 h-1.5 bg-brand-500 rounded-full animate-bounce" />
                             <span>Thinking...</span>
                         </div>
                     )}
@@ -556,7 +578,7 @@ export function CoworkView({ history, onSendMessage, onAbort, isProcessing, onOp
                                         type="submit"
                                         disabled={!input.trim() && images.length === 0}
                                         className={`p-2.5 rounded-lg transition-all ${input.trim() || images.length > 0
-                                            ? 'bg-orange-500 text-white shadow-md hover:bg-orange-600'
+                                            ? 'bg-brand-500 text-white shadow-md hover:bg-brand-600'
                                             : 'bg-stone-100 text-stone-300'
                                             }`}
                                     >
@@ -727,11 +749,11 @@ function EmptyState({ mode, workingDir }: { mode: Mode, workingDir: string | nul
     return (
         <div className="flex flex-col items-center justify-center h-full text-center space-y-4 py-20">
             <div className="w-16 h-16 rounded-2xl bg-white shadow-lg flex items-center justify-center rotate-3 border border-stone-100 overflow-hidden">
-                <img src="/icon.png" alt="Logo" className="w-full h-full object-cover" />
+                <img src="/logo.png" alt="Logo" className="w-full h-full object-cover" />
             </div>
             <div className="space-y-2">
                 <h2 className="text-xl font-semibold text-stone-800">
-                    {mode === 'chat' ? 'CodeBuddy Code Cowork Chat' : 'CodeBuddy Code Cowork'}
+                    {mode === 'chat' ? 'CodeBuddy Work Chat' : 'CodeBuddy Work'}
                 </h2>
                 <p className="text-stone-500 text-sm max-w-xs">
                     {mode === 'work' && !workingDir
