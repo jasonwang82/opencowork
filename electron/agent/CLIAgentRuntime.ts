@@ -119,6 +119,13 @@ export class CLIAgentRuntime {
         }
     }
 
+    private removeMessageFromHistory(message: Anthropic.MessageParam) {
+        const idx = this.history.indexOf(message);
+        if (idx !== -1) {
+            this.history.splice(idx, 1);
+        }
+    }
+
     private async executeCodeBuddy(userMessage: string) {
         const authorizedFolders = permissionManager.getAuthorizedFolders();
         const workingDir = authorizedFolders[0] || process.cwd();
@@ -157,6 +164,15 @@ export class CLIAgentRuntime {
 
         console.log(`[CLIAgentRuntime] Executing: codebuddy ${logArgs.join(' ')}`);
 
+        // Add an empty assistant message to history immediately
+        // This ensures the UI shows the message structure during streaming
+        const assistantMessage: Anthropic.MessageParam = {
+            role: 'assistant',
+            content: ''
+        };
+        this.history.push(assistantMessage);
+        this.notifyUpdate();
+
         return new Promise<void>((resolve, reject) => {
             this.currentProcess = spawn('codebuddy', args, {
                 cwd: workingDir,
@@ -189,17 +205,16 @@ export class CLIAgentRuntime {
 
             this.currentProcess.on('close', (code) => {
                 if (code === 0) {
-                    // Success - add assistant response to history
-                    this.history.push({
-                        role: 'assistant',
-                        content: stdoutBuffer || 'Command executed successfully.'
-                    });
+                    // Success - update final assistant response in history
+                    assistantMessage.content = stdoutBuffer || 'Command executed successfully.';
                     this.notifyUpdate();
                     resolve();
                 } else {
-                    // Error
+                    // Error - remove the empty assistant message and show error
+                    this.removeMessageFromHistory(assistantMessage);
                     const errorMessage = stderrBuffer || `CodeBuddy process exited with code ${code}`;
                     this.broadcast('agent:error', errorMessage);
+                    this.notifyUpdate();
                     reject(new Error(errorMessage));
                 }
                 this.currentProcess = null;
@@ -207,7 +222,10 @@ export class CLIAgentRuntime {
 
             this.currentProcess.on('error', (err) => {
                 console.error('[CodeBuddy Process Error]:', err);
+                // Remove the empty assistant message on error
+                this.removeMessageFromHistory(assistantMessage);
                 this.broadcast('agent:error', `Failed to start CodeBuddy: ${err.message}`);
+                this.notifyUpdate();
                 this.currentProcess = null;
                 reject(err);
             });
