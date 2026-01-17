@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import os from 'node:os'
 import fs from 'node:fs'
+import { spawn } from 'node:child_process'
 import dotenv from 'dotenv'
 import { AgentRuntime } from './agent/AgentRuntime'
 import { CLIAgentRuntime } from './agent/CLIAgentRuntime'
@@ -82,9 +83,6 @@ const BALL_SIZE = 64
 const EXPANDED_WIDTH = 340    // Match w-80 (320px) + padding
 const EXPANDED_HEIGHT = 320   // Compact height for less dramatic expansion
 
-// Debounce flag for new session
-let isCreatingSession = false
-
 app.on('before-quit', () => {
   app.isQuitting = true
 })
@@ -102,13 +100,13 @@ app.on('activate', () => {
 })
 
 // Handle GPU process crash - prevent app from crashing
-app.on('gpu-process-crashed', (event, killed) => {
+app.on('gpu-process-crashed' as any, (_event: unknown, killed: boolean) => {
   console.error('[Main] GPU process crashed, killed:', killed)
   // Don't quit the app, let it continue without GPU
 })
 
 // Handle child process crash
-app.on('child-process-gone', (event, details) => {
+app.on('child-process-gone', (_event: unknown, details: { type: string; reason: string }) => {
   console.error('[Main] Child process gone:', details.type, details.reason)
   // Don't quit for GPU crashes
   if (details.type === 'GPU') {
@@ -318,6 +316,64 @@ ipcMain.handle('shortcut:update', (_, newShortcut: string) => {
   } catch (e: unknown) {
     return { success: false, error: (e as Error).message }
   }
+})
+
+// CodeBuddy Install Handler
+ipcMain.handle('codebuddy:install', async () => {
+  return new Promise((resolve) => {
+    try {
+      console.log('[Main] Installing CodeBuddy CLI...')
+      
+      // Use npm to install globally
+      const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm'
+      const installProcess = spawn(npmCmd, ['install', '-g', '@tencent-ai/codebuddy-code'], {
+        stdio: 'pipe',
+        shell: false
+      })
+
+      let stdout = ''
+      let stderr = ''
+
+      installProcess.stdout?.on('data', (data) => {
+        const text = data.toString()
+        stdout += text
+        console.log('[CodeBuddy Install]', text.trim())
+      })
+
+      installProcess.stderr?.on('data', (data) => {
+        const text = data.toString()
+        stderr += text
+        console.error('[CodeBuddy Install Error]', text.trim())
+      })
+
+      installProcess.on('close', (code) => {
+        if (code === 0) {
+          console.log('[Main] CodeBuddy CLI installed successfully')
+          resolve({ success: true, message: '安装成功！' })
+        } else {
+          console.error('[Main] CodeBuddy CLI installation failed with code:', code)
+          resolve({ 
+            success: false, 
+            message: `安装失败 (退出码: ${code})。请手动运行: npm install -g @tencent-ai/codebuddy-code` 
+          })
+        }
+      })
+
+      installProcess.on('error', (err) => {
+        console.error('[Main] Failed to start npm install:', err)
+        resolve({ 
+          success: false, 
+          message: `安装失败: ${err.message}。请确保已安装 Node.js 和 npm。` 
+        })
+      })
+    } catch (err) {
+      console.error('[Main] Error installing CodeBuddy:', err)
+      resolve({ 
+        success: false, 
+        message: `安装失败: ${(err as Error).message}` 
+      })
+    }
+  })
 })
 
 ipcMain.handle('dialog:select-folder', async () => {
@@ -688,7 +744,7 @@ function createMainWindow() {
   })
 
   // Handle render process crash - auto recover
-  mainWin.webContents.on('render-process-gone', (event, details) => {
+  mainWin.webContents.on('render-process-gone', (_event: unknown, details: { reason: string }) => {
     console.error('[Main] Render process gone:', details.reason)
     if (details.reason !== 'clean-exit' && mainWin && !mainWin.isDestroyed()) {
       console.log('[Main] Attempting to reload main window...')
@@ -705,7 +761,7 @@ function createMainWindow() {
   })
 
   // Handle crashes
-  mainWin.webContents.on('crashed', () => {
+  mainWin.webContents.on('crashed' as any, () => {
     console.error('[Main] Main window crashed, reloading...')
     setTimeout(() => {
       try {
@@ -750,7 +806,7 @@ function createFloatingBallWindow() {
   })
 
   // Handle render process crash - auto recover
-  floatingBallWin.webContents.on('render-process-gone', (event, details) => {
+  floatingBallWin.webContents.on('render-process-gone', (_event: unknown, details: { reason: string }) => {
     console.error('[Main] Floating ball render process gone:', details.reason)
     if (details.reason !== 'clean-exit' && floatingBallWin && !floatingBallWin.isDestroyed()) {
       console.log('[Main] Attempting to reload floating ball...')
@@ -767,7 +823,7 @@ function createFloatingBallWindow() {
   })
 
   // Handle crashes
-  floatingBallWin.webContents.on('crashed', () => {
+  floatingBallWin.webContents.on('crashed' as any, () => {
     console.error('[Main] Floating ball crashed, reloading...')
     setTimeout(() => {
       try {

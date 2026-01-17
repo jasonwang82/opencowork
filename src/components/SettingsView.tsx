@@ -63,6 +63,10 @@ export function SettingsView({ onClose }: SettingsViewProps) {
     // Permissions State
     const [permissions, setPermissions] = useState<ToolPermission[]>([]);
 
+    // CodeBuddy Install State
+    const [isInstalling, setIsInstalling] = useState(false);
+    const [installStatus, setInstallStatus] = useState<string | null>(null);
+
     const loadPermissions = () => {
         window.ipcRenderer.invoke('permissions:list').then(list => setPermissions(list as ToolPermission[]));
     };
@@ -307,11 +311,43 @@ export function SettingsView({ onClose }: SettingsViewProps) {
                                         <div className="bg-amber-50 text-amber-700 rounded-lg p-3 text-xs space-y-2">
                                             <p className="font-medium">{t('codeBuddyInstructions')}</p>
                                             <ul className="list-disc list-inside space-y-1">
-                                                <li>{t('codeBuddyInstallRequired')}</li>
+                                                <li className="font-mono text-[10px]">{t('codeBuddyInstallRequired')}</li>
                                                 <li>{t('codeBuddyHelp')}</li>
-                                                <li>{t('codeBuddyCompatible')}</li>
                                                 <li>{t('codeBuddyEnvVars')}</li>
                                             </ul>
+                                            <div className="mt-3 pt-3 border-t border-amber-200">
+                                                <button
+                                                    onClick={async () => {
+                                                        setIsInstalling(true);
+                                                        setInstallStatus(null);
+                                                        try {
+                                                            const result = await window.ipcRenderer.invoke('codebuddy:install') as { success: boolean; message?: string };
+                                                            if (result.success) {
+                                                                setInstallStatus('安装成功！');
+                                                            } else {
+                                                                setInstallStatus(result.message || '安装失败');
+                                                            }
+                                                        } catch (err) {
+                                                            setInstallStatus('安装失败：' + (err as Error).message);
+                                                        } finally {
+                                                            setIsInstalling(false);
+                                                        }
+                                                    }}
+                                                    disabled={isInstalling}
+                                                    className={`w-full px-3 py-2 text-xs font-medium rounded-lg transition-colors ${
+                                                        isInstalling
+                                                            ? 'bg-amber-200 text-amber-600 cursor-not-allowed'
+                                                            : 'bg-brand-500 text-white hover:bg-brand-600'
+                                                    }`}
+                                                >
+                                                    {isInstalling ? '正在安装...' : '一键安装 CodeBuddy'}
+                                                </button>
+                                                {installStatus && (
+                                                    <p className={`mt-2 text-xs ${installStatus.includes('成功') ? 'text-green-600' : 'text-red-600'}`}>
+                                                        {installStatus}
+                                                    </p>
+                                                )}
+                                            </div>
                                         </div>
                                     </>
                                 )}
