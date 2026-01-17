@@ -10,6 +10,7 @@ import { CLIAgentRuntime } from './agent/CLIAgentRuntime'
 import { CodeBuddySDKRuntime } from './agent/CodeBuddySDKRuntime'
 import { configStore } from './config/ConfigStore'
 import { sessionStore } from './config/SessionStore'
+import { logger, getLogs, clearLogs } from './utils/logger'
 import Anthropic from '@anthropic-ai/sdk'
 
 // Extend App type to include isQuitting property
@@ -22,6 +23,40 @@ declare global {
 }
 
 dotenv.config()
+
+// Helper function to get correct path for public assets
+function getPublicAssetPath(filename: string): string {
+  if (app.isPackaged) {
+    // In production, try multiple possible paths
+    const possiblePaths = [
+      path.join(app.getAppPath(), 'dist', filename),
+      path.join(app.getAppPath(), filename),
+      path.join(process.resourcesPath, 'dist', filename),
+      path.join(process.resourcesPath, filename),
+      path.join(__dirname, '..', 'dist', filename),
+      path.join(__dirname, filename),
+    ]
+    
+    for (const p of possiblePaths) {
+      if (fs.existsSync(p)) {
+        console.log(`[getPublicAssetPath] Found ${filename} at: ${p}`)
+        return p
+      }
+    }
+    
+    // Fallback to first path even if not found
+    console.warn(`[getPublicAssetPath] Could not find ${filename}, tried paths:`, possiblePaths)
+    return possiblePaths[0]
+  } else {
+    // In development, use VITE_PUBLIC
+    return path.join(process.env.VITE_PUBLIC || '', filename)
+  }
+}
+
+// Use shared logger - wrapper functions
+const addLog = (message: string, data?: unknown) => logger.info(message, data)
+const logError = (message: string, data?: unknown) => logger.error(message, data)
+const logWarn = (message: string, data?: unknown) => logger.warn(message, data)
 
 // GPU crash protection - disable GPU acceleration to prevent crashes
 app.disableHardwareAcceleration()
@@ -115,15 +150,29 @@ app.on('child-process-gone', (_event: unknown, details: { type: string; reason: 
 })
 
 app.whenReady().then(() => {
+  // Log startup info for debugging
+  addLog('App starting', {
+    isPackaged: app.isPackaged,
+    appPath: app.getAppPath(),
+    resourcesPath: process.resourcesPath,
+    __dirname,
+    platform: process.platform,
+    version: app.getVersion()
+  })
+
   // Set App User Model ID for Windows notifications
   app.setAppUserModelId('com.opencowork.app')
 
   // Set app icon for macOS dock
   if (process.platform === 'darwin') {
-    const logoPath = path.join(process.env.VITE_PUBLIC || '', 'logo.png')
+    const logoPath = getPublicAssetPath('logo.png')
+    addLog('Setting dock icon from path', { logoPath, isPackaged: app.isPackaged })
     const appIcon = nativeImage.createFromPath(logoPath)
     if (!appIcon.isEmpty()) {
       app.dock.setIcon(appIcon)
+      addLog('Dock icon set successfully')
+    } else {
+      logWarn('Dock icon is empty, file may not exist', { logoPath })
     }
   }
 
@@ -168,7 +217,7 @@ app.whenReady().then(() => {
     mainWin?.show()
   }
 
-  console.log('CodeBuddy Work started. Press Alt+Space to toggle floating ball.')
+  console.log('WorkBuddy started. Press Alt+Space to toggle floating ball.')
 })
 
 
@@ -312,6 +361,35 @@ ipcMain.handle('config:set-all', (_, cfg) => {
 
   // Reinitialize agent
   initializeAgent()
+})
+
+// Log viewer handlers
+ipcMain.handle('logs:get-all', () => {
+  return getLogs()
+})
+
+ipcMain.handle('logs:clear', () => {
+  clearLogs()
+  return { success: true }
+})
+
+ipcMain.handle('logs:export', async () => {
+  const logs = getLogs()
+  const logContent = logs.map(log => 
+    `[${log.timestamp}] [${log.level.toUpperCase()}] ${log.message}${log.data ? ' ' + JSON.stringify(log.data) : ''}`
+  ).join('\n')
+  
+  const result = await dialog.showSaveDialog({
+    title: '导出日志',
+    defaultPath: `codebuddy-work-logs-${new Date().toISOString().replace(/[:.]/g, '-')}.txt`,
+    filters: [{ name: 'Text Files', extensions: ['txt'] }]
+  })
+  
+  if (!result.canceled && result.filePath) {
+    fs.writeFileSync(result.filePath, logContent)
+    return { success: true, path: result.filePath }
+  }
+  return { success: false }
 })
 
 // Shortcut update handler
@@ -672,24 +750,31 @@ function initializeAgent() {
 
 function createTray() {
   try {
-    const logoPath = path.join(process.env.VITE_PUBLIC || '', 'logo.png')
+    const logoPath = getPublicAssetPath('logo.png')
+    addLog('Creating tray icon from path', { logoPath, isPackaged: app.isPackaged })
     let trayIcon = nativeImage.createFromPath(logoPath)
     
-    // Resize for macOS menu bar (16x16 is standard, use 32x32 for Retina)
-    if (process.platform === 'darwin') {
-      trayIcon = trayIcon.resize({ width: 18, height: 18 })
+    if (trayIcon.isEmpty()) {
+      logWarn('Tray icon is empty, using blank icon', { logoPath })
+      trayIcon = nativeImage.createEmpty()
     } else {
-      trayIcon = trayIcon.resize({ width: 20, height: 20 })
+      // Resize for macOS menu bar (16x16 is standard, use 32x32 for Retina)
+      if (process.platform === 'darwin') {
+        trayIcon = trayIcon.resize({ width: 18, height: 18 })
+      } else {
+        trayIcon = trayIcon.resize({ width: 20, height: 20 })
+      }
+      addLog('Tray icon created successfully')
     }
     
     tray = new Tray(trayIcon)
   } catch (e) {
-    console.error('[Main] Failed to create tray icon:', e)
+    logError('Failed to create tray icon', { error: String(e) })
     const blankIcon = nativeImage.createEmpty()
     tray = new Tray(blankIcon)
   }
 
-  tray.setToolTip('CodeBuddy Work')
+  tray.setToolTip('WorkBuddy')
 
   const contextMenu = Menu.buildFromTemplate([
     {
@@ -738,7 +823,7 @@ function createMainWindow() {
     height: 720,
     minWidth: 400,
     minHeight: 600,
-    icon: path.join(process.env.VITE_PUBLIC || '', 'logo.png'),
+    icon: getPublicAssetPath('logo.png'),
     frame: false,
     // On macOS: use hiddenInset for native traffic lights
     // On Windows/Linux: completely frameless, custom controls in renderer
@@ -825,7 +910,7 @@ function createFloatingBallWindow() {
     webPreferences: {
       preload: path.join(__dirname, 'preload.mjs'),
     },
-    icon: path.join(process.env.VITE_PUBLIC, 'logo.png'),
+    icon: getPublicAssetPath('logo.png'),
   })
 
   // Handle render process crash - auto recover

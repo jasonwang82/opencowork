@@ -1,7 +1,9 @@
 import { BrowserWindow } from 'electron';
-import { spawn, ChildProcess } from 'child_process';
+import { spawn, ChildProcess, execSync } from 'child_process';
+import fs from 'fs';
 import { permissionManager } from './security/PermissionManager';
 import { configStore } from '../config/ConfigStore';
+import { logger } from '../utils/logger';
 import Anthropic from '@anthropic-ai/sdk';
 
 export type AgentMessage = {
@@ -69,6 +71,7 @@ export class CLIAgentRuntime {
             });
             testProcess.on('error', (err) => {
                 console.error('[CLIAgentRuntime] CodeBuddy CLI not found:', err);
+                logger.error('CodeBuddy CLI not found', { error: err.message, code: err.name });
                 this.broadcast('agent:error', 
                     'CodeBuddy CLI is not installed or not in PATH. ' +
                     'Please install it by following the instructions at the CodeBuddy documentation. ' +
@@ -84,11 +87,97 @@ export class CLIAgentRuntime {
             });
         } catch (error) {
             console.error('[CLIAgentRuntime] Failed to check CodeBuddy CLI:', error);
+            logger.error('Failed to check CodeBuddy CLI', { error: String(error) });
         }
     }
 
     public removeWindow(win: BrowserWindow) {
         this.windows = this.windows.filter(w => w !== win);
+    }
+
+    /**
+     * Find a compatible Node.js version from nvm or system
+     * Returns the bin path to prepend to PATH, or error message if none found
+     */
+    private findCompatibleNodePath(): { path: string | null; error: string | null } {
+        try {
+            const home = process.env.HOME || '';
+            const nvmDir = `${home}/.nvm/versions/node`;
+            
+            // Check if nvm is installed
+            if (fs.existsSync(nvmDir)) {
+                const versions = fs.readdirSync(nvmDir).filter((v: string) => v.startsWith('v'));
+                console.log('[CLIAgentRuntime] Found nvm versions:', versions);
+                
+                // Sort versions in descending order (newest first)
+                const sortedVersions = versions.sort((a: string, b: string) => {
+                    const parseVersion = (v: string) => {
+                        const match = v.match(/^v(\d+)\.(\d+)\.(\d+)$/);
+                        if (!match) return [0, 0, 0];
+                        return [parseInt(match[1]), parseInt(match[2]), parseInt(match[3])];
+                    };
+                    const [aMajor, aMinor, aPatch] = parseVersion(a);
+                    const [bMajor, bMinor, bPatch] = parseVersion(b);
+                    if (aMajor !== bMajor) return bMajor - aMajor;
+                    if (aMinor !== bMinor) return bMinor - aMinor;
+                    return bPatch - aPatch;
+                });
+                
+                // Find a compatible version (v18.20.8+ or v20+ or v22+)
+                for (const version of sortedVersions) {
+                    const match = version.match(/^v(\d+)\.(\d+)\.(\d+)$/);
+                    if (!match) continue;
+                    
+                    const major = parseInt(match[1]);
+                    const minor = parseInt(match[2]);
+                    const patch = parseInt(match[3]);
+                    
+                    // Check if version meets requirements
+                    let compatible = false;
+                    if (major >= 20) {
+                        compatible = true;
+                    } else if (major === 18) {
+                        if (minor > 20) compatible = true;
+                        else if (minor === 20 && patch >= 8) compatible = true;
+                    }
+                    
+                    if (compatible) {
+                        const binPath = `${nvmDir}/${version}/bin`;
+                        if (fs.existsSync(binPath)) {
+                            console.log(`[CLIAgentRuntime] Using Node.js ${version} from: ${binPath}`);
+                            logger.info('Using compatible Node.js version', { version, binPath });
+                            return { path: binPath, error: null };
+                        }
+                    }
+                }
+                
+                // No compatible version found in nvm
+                return { 
+                    path: null, 
+                    error: `Node.js 版本过低。CodeBuddy 需要 Node.js v18.20.8 或更新版本。\n` +
+                           `在 nvm 中找到的版本都不兼容: ${versions.join(', ')}\n` +
+                           `请安装更新的版本: nvm install 22`
+                };
+            }
+            
+            // No nvm, check system node
+            try {
+                const version = execSync('node --version', { encoding: 'utf-8' }).trim();
+                console.log('[CLIAgentRuntime] System Node.js version:', version);
+                
+                // Just return null path - use system PATH
+                // Let the CLI itself complain if version is too old
+                return { path: null, error: null };
+            } catch (e) {
+                return { 
+                    path: null, 
+                    error: 'Node.js 未找到。请安装 Node.js v18.20.8 或更新版本: https://nodejs.org/'
+                };
+            }
+        } catch (e) {
+            console.warn('[CLIAgentRuntime] Failed to find compatible Node.js:', e);
+            return { path: null, error: null }; // Let it try anyway
+        }
     }
 
     public handleConfirmResponse(id: string, approved: boolean) {
@@ -140,11 +229,21 @@ export class CLIAgentRuntime {
 
         } catch (error: unknown) {
             const err = error as { message?: string };
+            const errorMessage = err.message || 'An unknown error occurred';
             console.error('CLI Agent Error:', error);
-            this.broadcast('agent:error', err.message || 'An unknown error occurred');
+            logger.error('CLI Agent Error', { error: errorMessage });
+            
+            // Add error message to history
+            this.history.push({
+                role: 'assistant',
+                content: errorMessage
+            });
+            
+            this.broadcast('agent:error', errorMessage);
         } finally {
             this.isProcessing = false;
             this.notifyUpdate();
+            this.broadcast('agent:complete', null);
         }
     }
 
@@ -156,6 +255,29 @@ export class CLIAgentRuntime {
     }
 
     private async executeCodeBuddy(userMessage: string) {
+        // Find a compatible Node.js version
+        const nodeResult = this.findCompatibleNodePath();
+        if (nodeResult.error) {
+            console.error('[CLIAgentRuntime] No compatible Node.js found');
+            logger.error('Node.js version incompatible', { 
+                error: nodeResult.error,
+                requiredVersion: 'v18.20.8+'
+            });
+            this.history.push({
+                role: 'assistant',
+                content: nodeResult.error
+            });
+            this.notifyUpdate();
+            this.broadcast('agent:complete', null);
+            this.isProcessing = false;
+            return;
+        }
+        
+        const compatibleNodeBinPath = nodeResult.path;
+        if (compatibleNodeBinPath) {
+            console.log('[CLIAgentRuntime] Will use Node.js from:', compatibleNodeBinPath);
+        }
+
         const authorizedFolders = permissionManager.getAuthorizedFolders();
         if (authorizedFolders.length === 0) {
             const errorMsg = '请先选择工作目录。点击左下角的文件夹图标选择一个项目目录。';
@@ -211,11 +333,50 @@ export class CLIAgentRuntime {
             // For CLI mode, let CLI use its own credentials from ~/.codebuddy/
             // Do NOT override with app settings - CLI has its own authentication system
             
+            const home = process.env.HOME || '';
+            
+            // Build PATH - include all common locations where codebuddy might be installed
+            const standardPaths = '/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin';
+            const nvmPaths = `${home}/.nvm/versions/node/v22.15.1/bin:${home}/.nvm/versions/node/v20.19.1/bin:${home}/.nvm/versions/node/v18.20.8/bin`;
+            const npmPaths = `${home}/.npm-global/bin:${home}/node_modules/.bin:/usr/local/lib/node_modules/.bin`;
+            
+            let pathEnv = process.env.PATH || '';
+            
+            // Prepend compatible Node.js bin path if found
+            if (compatibleNodeBinPath) {
+                pathEnv = `${compatibleNodeBinPath}:${nvmPaths}:${npmPaths}:${pathEnv}:${standardPaths}`;
+                console.log('[CLIAgentRuntime] Using PATH with compatible Node.js:', compatibleNodeBinPath);
+            } else {
+                pathEnv = `${nvmPaths}:${npmPaths}:${pathEnv}:${standardPaths}`;
+            }
+            
+            console.log('[CLIAgentRuntime] Full PATH:', pathEnv);
+            logger.info('CLI PATH configured', { compatibleNodeBinPath, pathLength: pathEnv.length });
+            
+            // Try to find codebuddy's full path
+            let codebuddyCommand = 'codebuddy';
+            try {
+                const codebuddyPath = execSync(`which codebuddy`, {
+                    encoding: 'utf-8',
+                    env: { ...process.env, PATH: pathEnv, HOME: home },
+                    shell: '/bin/bash'
+                }).trim();
+                if (codebuddyPath && fs.existsSync(codebuddyPath)) {
+                    codebuddyCommand = codebuddyPath;
+                    console.log('[CLIAgentRuntime] Found codebuddy at:', codebuddyPath);
+                    logger.info('CodeBuddy CLI found', { path: codebuddyPath });
+                }
+            } catch (e) {
+                console.warn('[CLIAgentRuntime] Could not find codebuddy with which, will try direct execution');
+                logger.warn('CodeBuddy which failed', { error: String(e) });
+            }
+            
             // Build env - inherit from process.env to preserve HOME, PATH, etc.
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const env: Record<string, any> = {
                 ...process.env,
-                PATH: `${process.env.PATH || ''}:/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:${process.env.HOME}/.nvm/versions/node/v22.15.1/bin`,
+                PATH: pathEnv,
+                HOME: home,  // Ensure HOME is set
             };
             
             // IMPORTANT: Do NOT set CODEBUDDY_API_KEY for CLI mode
@@ -231,10 +392,11 @@ export class CLIAgentRuntime {
             
             console.log('[CLIAgentRuntime] Environment:');
             console.log('[CLIAgentRuntime] HOME:', env.HOME);
+            console.log('[CLIAgentRuntime] CodeBuddy command:', codebuddyCommand);
             console.log('[CLIAgentRuntime] CODEBUDDY_API_KEY: NOT SET (using CLI native auth)');
             console.log('[CLIAgentRuntime] CODEBUDDY_INTERNET_ENVIRONMENT: NOT SET (using CLI config)');
 
-            this.currentProcess = spawn('codebuddy', args, {
+            this.currentProcess = spawn(codebuddyCommand, args, {
                 cwd: workingDir,
                 shell: true, // Use shell: true to find codebuddy in PATH
                 env: env as NodeJS.ProcessEnv
@@ -280,8 +442,17 @@ export class CLIAgentRuntime {
                     const text = data.toString();
                     stderrBuffer += text;
                     console.error('[CodeBuddy Error]:', text);
+                    
+                    // Check for Node.js version error
+                    if (text.includes('requires Node.js') || text.includes('Node.js v')) {
+                        logger.error('Node.js version error detected', { stderr: text.trim() });
+                        // The error will be handled in the close handler
+                    } else {
+                        logger.error('CodeBuddy stderr', { stderr: text.trim() });
+                    }
                 } catch (err) {
                     console.error('[CLIAgentRuntime] Error processing stderr:', err);
+                    logger.error('Error processing stderr', { error: String(err) });
                 }
             });
 
@@ -306,9 +477,30 @@ export class CLIAgentRuntime {
                         this.notifyUpdate();
                         resolve();
                     } else {
-                        // Error - remove the empty assistant message and show error
-                        this.removeMessageFromHistory(assistantMessage);
-                        const errorMessage = stderrBuffer || `CodeBuddy process exited with code ${code}`;
+                        // Error - update assistant message with error instead of removing
+                        let errorMessage = stderrBuffer || `CodeBuddy process exited with code ${code}`;
+                        
+                        // Check for Node.js version error and provide friendly message
+                        if (errorMessage.includes('requires Node.js') || errorMessage.includes('Node.js v')) {
+                            const versionMatch = errorMessage.match(/Node\.js v([\d.]+)/);
+                            const requiredVersion = versionMatch ? versionMatch[1] : 'v18.20.8';
+                            errorMessage = `Node.js 版本过低。\n\n` +
+                                `CodeBuddy 需要 Node.js ${requiredVersion} 或更新版本。\n` +
+                                `当前版本: ${process.version}\n\n` +
+                                `请升级 Node.js:\n` +
+                                `https://nodejs.org/en/download/\n\n` +
+                                `或者使用 nvm 升级:\n` +
+                                `nvm install 18.20.8\n` +
+                                `nvm use 18.20.8`;
+                            logger.error('Node.js version incompatible', { 
+                                currentVersion: process.version,
+                                requiredVersion,
+                                stderr: stderrBuffer
+                            });
+                        }
+                        
+                        // Update assistant message with error instead of removing
+                        assistantMessage.content = errorMessage;
                         this.broadcast('agent:error', errorMessage);
                         this.notifyUpdate();
                         reject(new Error(errorMessage));
@@ -323,6 +515,7 @@ export class CLIAgentRuntime {
 
             this.currentProcess.on('error', (err) => {
                 console.error('[CodeBuddy Process Error]:', err);
+                logger.error('CodeBuddy process error', { error: err.message, name: err.name });
                 // Remove the empty assistant message on error
                 this.removeMessageFromHistory(assistantMessage);
                 this.broadcast('agent:error', `Failed to start CodeBuddy: ${err.message}`);
@@ -343,6 +536,11 @@ export class CLIAgentRuntime {
             // Print full message details for debugging errors
             if (msg.type === 'result' && (msg.subtype === 'error_during_execution' || msg.is_error)) {
                 console.error('[CLIAgentRuntime] Error details:', JSON.stringify(msg, null, 2));
+                logger.error('CLI execution error', { 
+                    subtype: msg.subtype, 
+                    error: msg.error_message || msg.result,
+                    is_error: msg.is_error
+                });
             }
             
             if (msg.type === 'system' && msg.subtype === 'init') {

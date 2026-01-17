@@ -287,7 +287,7 @@ export function FloatingBallPage() {
                             boxShadow: '0 4px 20px rgba(0, 0, 0, 0.15), 0 2px 8px rgba(0, 0, 0, 0.1), inset 0 1px 2px rgba(255, 255, 255, 0.8)'
                         }}
                     >
-                        <img src="/logo-sketch.png" alt="Logo" className="w-9 h-9 object-contain" />
+                        <img src="./logo-sketch.png" alt="Logo" className="w-9 h-9 object-contain" />
                     </div>
                     {isProcessing && (
                         <div className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-brand-500 rounded-full animate-pulse border-2 border-white" />
@@ -474,7 +474,7 @@ export function FloatingBallPage() {
 
             {/* Header */}
             <div className="flex items-center justify-between px-3 py-2 border-b border-stone-100 shrink-0">
-                <span className="text-sm font-medium text-stone-700">CodeBuddy Work</span>
+                <span className="text-sm font-medium text-stone-700">WorkBuddy</span>
                 <div className="flex items-center gap-1">
                     <button
                         onClick={() => {

@@ -89,8 +89,8 @@ function App() {
         } as React.CSSProperties}
       >
         <div className="flex items-center gap-2" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
-          <img src="/logo.png" alt="Logo" className="w-6 h-6 rounded-md object-cover" />
-          <span className="font-medium text-stone-700 text-sm">CodeBuddy Work</span>
+          <img src="./logo.png" alt="Logo" className="w-6 h-6 rounded-md object-cover" />
+          <span className="font-medium text-stone-700 text-sm">WorkBuddy</span>
         </div>
 
         {/* Window Controls - Only show on Windows/Linux */}

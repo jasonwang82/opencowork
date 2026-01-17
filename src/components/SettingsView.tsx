@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { X, Settings, FolderOpen, Server, Check, Plus, Trash2, Edit2, Zap, Eye } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { X, Settings, FolderOpen, Server, Check, Plus, Trash2, Edit2, Zap, Eye, FileText, Download, RefreshCw } from 'lucide-react';
 import { SkillEditor } from './SkillEditor';
 import { useI18n } from '../i18n/useI18n';
 import type { IntegrationMode } from '../../electron/config/ConfigStore';
@@ -47,8 +47,18 @@ export function SettingsView({ onClose }: SettingsViewProps) {
         codeBuddyInternetEnv: 'ioa'
     });
     const [saved, setSaved] = useState(false);
-    const [activeTab, setActiveTab] = useState<'api' | 'folders' | 'mcp' | 'skills' | 'advanced'>('api');
+    const [activeTab, setActiveTab] = useState<'api' | 'folders' | 'mcp' | 'skills' | 'advanced' | 'logs'>('api');
     const [isRecordingShortcut, setIsRecordingShortcut] = useState(false);
+
+    // Logs State
+    interface LogEntry {
+        timestamp: string;
+        level: string;
+        message: string;
+        data?: unknown;
+    }
+    const [logs, setLogs] = useState<LogEntry[]>([]);
+    const [logsLoading, setLogsLoading] = useState(false);
 
     // MCP State
     const [mcpConfig, setMcpConfig] = useState('');
@@ -99,6 +109,33 @@ export function SettingsView({ onClose }: SettingsViewProps) {
         }
     };
 
+    // Log functions
+    const loadLogs = useCallback(async () => {
+        setLogsLoading(true);
+        try {
+            const logData = await window.ipcRenderer.invoke('logs:get-all');
+            setLogs((logData as LogEntry[]) || []);
+        } catch (e) {
+            console.error('Failed to load logs:', e);
+        } finally {
+            setLogsLoading(false);
+        }
+    }, []);
+
+    const clearLogs = async () => {
+        if (confirm('确定要清除所有日志吗？')) {
+            await window.ipcRenderer.invoke('logs:clear');
+            loadLogs();
+        }
+    };
+
+    const exportLogs = async () => {
+        const result = await window.ipcRenderer.invoke('logs:export');
+        if ((result as { success: boolean }).success) {
+            alert('日志已导出');
+        }
+    };
+
     const revokePermission = async (tool: string, pathPattern?: string) => {
         await window.ipcRenderer.invoke('permissions:revoke', { tool, pathPattern });
         loadPermissions();
@@ -125,8 +162,10 @@ export function SettingsView({ onClose }: SettingsViewProps) {
         } else if (activeTab === 'advanced') {
             loadPermissions();
             loadBlacklist();
+        } else if (activeTab === 'logs') {
+            loadLogs();
         }
-    }, [activeTab]);
+    }, [activeTab, loadLogs]);
 
     // Shortcut recording handler
     const handleShortcutKeyDown = (e: React.KeyboardEvent) => {
@@ -238,6 +277,7 @@ export function SettingsView({ onClose }: SettingsViewProps) {
                         { id: 'mcp' as const, label: 'MCP', icon: <Server size={14} /> },
                         { id: 'skills' as const, label: 'Skills', icon: <Zap size={14} /> },
                         { id: 'advanced' as const, label: '高级', icon: <Settings size={14} /> },
+                        { id: 'logs' as const, label: '日志', icon: <FileText size={14} /> },
                     ].map(tab => (
                         <button
                             key={tab.id}
@@ -679,6 +719,81 @@ export function SettingsView({ onClose }: SettingsViewProps) {
                                     </div>
                                 </div>
                             </>
+                        )}
+
+                        {activeTab === 'logs' && (
+                            <div className="space-y-4">
+                                {/* Header with actions */}
+                                <div className="flex items-center justify-between">
+                                    <div>
+                                        <h3 className="text-sm font-medium text-stone-700">应用日志</h3>
+                                        <p className="text-xs text-stone-400">查看应用运行日志，用于排查问题</p>
+                                    </div>
+                                    <div className="flex gap-2">
+                                        <button
+                                            onClick={loadLogs}
+                                            disabled={logsLoading}
+                                            className="flex items-center gap-1 px-2 py-1.5 text-xs font-medium text-stone-600 bg-stone-100 rounded-lg hover:bg-stone-200 disabled:opacity-50"
+                                        >
+                                            <RefreshCw size={12} className={logsLoading ? 'animate-spin' : ''} />
+                                            刷新
+                                        </button>
+                                        <button
+                                            onClick={exportLogs}
+                                            className="flex items-center gap-1 px-2 py-1.5 text-xs font-medium text-stone-600 bg-stone-100 rounded-lg hover:bg-stone-200"
+                                        >
+                                            <Download size={12} />
+                                            导出
+                                        </button>
+                                        <button
+                                            onClick={clearLogs}
+                                            className="flex items-center gap-1 px-2 py-1.5 text-xs font-medium text-red-600 bg-red-50 rounded-lg hover:bg-red-100"
+                                        >
+                                            <Trash2 size={12} />
+                                            清除
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {/* Log count */}
+                                <div className="text-xs text-stone-500">
+                                    共 {logs.length} 条日志记录
+                                </div>
+
+                                {/* Log list */}
+                                <div className="bg-stone-900 rounded-lg p-3 font-mono text-xs max-h-[400px] overflow-y-auto">
+                                    {logs.length === 0 ? (
+                                        <div className="text-stone-500 text-center py-8">
+                                            暂无日志
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-1">
+                                            {logs.slice().reverse().map((log, idx) => (
+                                                <div key={idx} className="flex gap-2 py-1 border-b border-stone-800 last:border-0">
+                                                    <span className="text-stone-500 whitespace-nowrap">
+                                                        {new Date(log.timestamp).toLocaleTimeString()}
+                                                    </span>
+                                                    <span className={`font-medium whitespace-nowrap ${
+                                                        log.level === 'error' ? 'text-red-400' :
+                                                        log.level === 'warn' ? 'text-yellow-400' :
+                                                        'text-green-400'
+                                                    }`}>
+                                                        [{log.level.toUpperCase()}]
+                                                    </span>
+                                                    <span className="text-stone-300 break-all">
+                                                        {log.message}
+                                                        {log.data !== undefined && log.data !== null && (
+                                                            <span className="text-stone-500 ml-2">
+                                                                {String(JSON.stringify(log.data))}
+                                                            </span>
+                                                        )}
+                                                    </span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
                         )}
                     </div>
                 </div>

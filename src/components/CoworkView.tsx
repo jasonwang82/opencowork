@@ -772,7 +772,7 @@ function EmptyState({ mode, workingDir, onSelectFolder, onOpenSettings }: {
             </div>
             <div className="space-y-3">
                 <h2 className="text-xl font-semibold text-stone-800">
-                    {mode === 'chat' ? 'CodeBuddy Work Chat' : 'CodeBuddy Work'}
+                    {mode === 'chat' ? 'WorkBuddy Chat' : 'WorkBuddy'}
                 </h2>
                 {mode === 'work' && !workingDir ? (
                     <div className="space-y-3">

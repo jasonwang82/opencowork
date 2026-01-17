@@ -1,11 +1,11 @@
 #!/bin/bash
 
-# CodeBuddy Work 构建脚本
+# WorkBuddy 构建脚本
 # 用于构建 macOS 应用程序包
 
 set -e  # 遇到错误立即退出
 
-echo "🚀 开始构建 CodeBuddy Work..."
+echo "🚀 开始构建 WorkBuddy..."
 
 # 获取版本号
 VERSION=$(node -p "require('./package.json').version")
@@ -64,8 +64,8 @@ echo ""
 echo "✅ 构建完成！"
 echo ""
 echo "📁 构建产物位置:"
-echo "   - DMG 安装包: release/$VERSION/CodeBuddy Work-Mac-$VERSION-Installer.dmg"
-echo "   - 应用程序: release/$VERSION/mac-arm64/CodeBuddy Work.app"
+echo "   - DMG 安装包: release/$VERSION/WorkBuddy-Mac-$VERSION-Installer.dmg"
+echo "   - 应用程序: release/$VERSION/mac-arm64/WorkBuddy.app"
 echo ""
 echo "🎉 可以分发 DMG 文件给用户安装使用！"
 
