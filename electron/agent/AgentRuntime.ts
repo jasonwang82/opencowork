@@ -333,12 +333,18 @@ ${workingDirContext}
                                     const args = toolUse.input as { command: string, cwd?: string };
                                     const defaultCwd = authorizedFolders[0] || process.cwd();
 
-                                    // Require confirmation for command execution
-                                    const approved = await this.requestConfirmation(toolUse.name, `Execute command: ${args.command}`, args);
-                                    if (approved) {
-                                        result = await this.fsTools.runCommand(args, defaultCwd);
+                                    // Check blacklist first
+                                    if (permissionManager.isCommandBlocked(args.command)) {
+                                        const blockedReason = permissionManager.getBlockedReason(args.command);
+                                        result = `Error: Command blocked by security policy. The command contains a blocked pattern: "${blockedReason}". You can modify the blacklist in Settings > Advanced.`;
                                     } else {
-                                        result = 'User denied the command execution.';
+                                        // Require confirmation for command execution
+                                        const approved = await this.requestConfirmation(toolUse.name, `Execute command: ${args.command}`, args);
+                                        if (approved) {
+                                            result = await this.fsTools.runCommand(args, defaultCwd);
+                                        } else {
+                                            result = 'User denied the command execution.';
+                                        }
                                     }
                                 } else {
                                     const skillInfo = this.skillManager.getSkillInfo(toolUse.name);

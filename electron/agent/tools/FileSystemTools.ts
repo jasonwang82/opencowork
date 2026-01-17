@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import { permissionManager } from '../security/PermissionManager';
 
 const execAsync = promisify(exec);
 
@@ -91,6 +92,12 @@ export class FileSystemTools {
     async runCommand(args: { command: string, cwd?: string }, defaultCwd: string) {
         const workingDir = args.cwd || defaultCwd;
         const timeout = 60000; // 60 second timeout
+
+        // Double-check blacklist (should already be checked by AgentRuntime, but extra safety)
+        if (permissionManager.isCommandBlocked(args.command)) {
+            const blockedReason = permissionManager.getBlockedReason(args.command);
+            return `Error: Command blocked by security policy. The command contains a blocked pattern: "${blockedReason}"`;
+        }
 
         try {
             console.log(`[FileSystemTools] Executing command: ${args.command} in ${workingDir}`);

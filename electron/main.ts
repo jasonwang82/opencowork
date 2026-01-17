@@ -268,6 +268,26 @@ ipcMain.handle('permissions:clear', () => {
   return { success: true }
 })
 
+// Command Blacklist Management
+ipcMain.handle('blacklist:get', () => {
+  return configStore.getCommandBlacklist()
+})
+
+ipcMain.handle('blacklist:add', (_, command: string) => {
+  configStore.addToBlacklist(command)
+  return { success: true }
+})
+
+ipcMain.handle('blacklist:remove', (_, command: string) => {
+  configStore.removeFromBlacklist(command)
+  return { success: true }
+})
+
+ipcMain.handle('blacklist:reset', () => {
+  configStore.resetBlacklistToDefault()
+  return { success: true }
+})
+
 ipcMain.handle('agent:set-working-dir', (_, folderPath: string) => {
   // Set as first (primary) in the list
   const folders = configStore.getAll().authorizedFolders || []
@@ -324,11 +344,11 @@ ipcMain.handle('codebuddy:install', async () => {
     try {
       console.log('[Main] Installing CodeBuddy CLI...')
       
-      // Use npm to install globally
-      const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm'
-      const installProcess = spawn(npmCmd, ['install', '-g', '@tencent-ai/codebuddy-code'], {
+      // Use npm to install globally - need shell: true to find npm in PATH
+      const installProcess = spawn('npm', ['install', '-g', '@tencent-ai/codebuddy-code'], {
         stdio: 'pipe',
-        shell: false
+        shell: true,
+        env: { ...process.env, PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin' }
       })
 
       let stdout = ''
@@ -580,20 +600,22 @@ function initializeAgent() {
     }
 
     // Inject CodeBuddy environment variables from stored config (UI values take priority)
+    // Default to 'ioa' for internal network environment
     try {
       const storedApiKey = configStore.getCodeBuddyApiKey()
-      const storedInternetEnv = configStore.getCodeBuddyInternetEnv()
+      const storedInternetEnv = configStore.getCodeBuddyInternetEnv() // defaults to 'ioa'
       
       if (storedApiKey && storedApiKey.trim() !== '') {
         process.env.CODEBUDDY_API_KEY = storedApiKey
         console.log('[main] Injected CODEBUDDY_API_KEY from stored config')
       }
-      if (storedInternetEnv && storedInternetEnv.trim() !== '') {
-        process.env.CODEBUDDY_INTERNET_ENVIRONMENT = storedInternetEnv
-        console.log('[main] Injected CODEBUDDY_INTERNET_ENVIRONMENT:', storedInternetEnv)
-      }
+      // Always set internet environment, default to 'ioa'
+      process.env.CODEBUDDY_INTERNET_ENVIRONMENT = storedInternetEnv || 'ioa'
+      console.log('[main] Injected CODEBUDDY_INTERNET_ENVIRONMENT:', process.env.CODEBUDDY_INTERNET_ENVIRONMENT)
     } catch (envErr) {
       console.error('[main] Failed to inject CodeBuddy env vars:', envErr)
+      // Fallback to default
+      process.env.CODEBUDDY_INTERNET_ENVIRONMENT = 'ioa'
     }
 
     if (integrationMode === 'sdk-codebuddy') {
@@ -734,6 +756,7 @@ function createMainWindow() {
 
   mainWin.once('ready-to-show', () => {
     console.log('Main window ready.')
+    mainWin?.show()
   })
 
   mainWin.on('close', (event) => {

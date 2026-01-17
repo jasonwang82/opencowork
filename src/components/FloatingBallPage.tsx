@@ -280,9 +280,14 @@ export function FloatingBallPage() {
                 onMouseDown={handleMouseDown}
             >
                 <div className="relative w-14 h-14 group">
-                    <div className="absolute inset-0 bg-amber-200/30 blur-xl rounded-full opacity-0 group-hover:opacity-100 transition-opacity" />
-                    <div className="relative w-14 h-14 rounded-full bg-stone-800 flex items-center justify-center shadow-lg border border-stone-700 transition-transform hover:scale-105 overflow-hidden">
-                        <img src="/logo.png" alt="Logo" className="w-full h-full object-cover" />
+                    <div className="absolute inset-0 bg-brand-500/30 blur-2xl rounded-full opacity-0 group-hover:opacity-100 transition-opacity" />
+                    <div 
+                        className="relative w-14 h-14 rounded-full flex items-center justify-center transition-transform hover:scale-105 overflow-hidden bg-white"
+                        style={{ 
+                            boxShadow: '0 4px 20px rgba(0, 0, 0, 0.15), 0 2px 8px rgba(0, 0, 0, 0.1), inset 0 1px 2px rgba(255, 255, 255, 0.8)'
+                        }}
+                    >
+                        <img src="/logo-sketch.png" alt="Logo" className="w-9 h-9 object-contain" />
                     </div>
                     {isProcessing && (
                         <div className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-brand-500 rounded-full animate-pulse border-2 border-white" />

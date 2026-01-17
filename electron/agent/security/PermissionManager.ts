@@ -49,6 +49,44 @@ export class PermissionManager {
     isNetworkAccessEnabled(): boolean {
         return this.networkAccess;
     }
+
+    /**
+     * Check if a command is blocked by the blacklist
+     * @param command The command string to check
+     * @returns true if the command is blocked, false otherwise
+     */
+    isCommandBlocked(command: string): boolean {
+        const blacklist = configStore.getCommandBlacklist();
+        const normalizedCommand = command.toLowerCase().trim();
+        
+        for (const blockedPattern of blacklist) {
+            const pattern = blockedPattern.toLowerCase().trim();
+            // Check if command contains the blocked pattern
+            if (normalizedCommand.includes(pattern)) {
+                console.warn(`[PermissionManager] Command blocked by blacklist: "${command}" matches pattern "${blockedPattern}"`);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Get the reason why a command was blocked
+     * @param command The command that was blocked
+     * @returns The matching blacklist pattern, or null if not blocked
+     */
+    getBlockedReason(command: string): string | null {
+        const blacklist = configStore.getCommandBlacklist();
+        const normalizedCommand = command.toLowerCase().trim();
+        
+        for (const blockedPattern of blacklist) {
+            const pattern = blockedPattern.toLowerCase().trim();
+            if (normalizedCommand.includes(pattern)) {
+                return blockedPattern;
+            }
+        }
+        return null;
+    }
 }
 
 export const permissionManager = new PermissionManager();

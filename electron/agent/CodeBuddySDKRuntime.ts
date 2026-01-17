@@ -2,6 +2,7 @@ import { BrowserWindow } from 'electron';
 import { query } from '@tencent-ai/agent-sdk';
 import { permissionManager } from './security/PermissionManager';
 import Anthropic from '@anthropic-ai/sdk';
+import { execSync } from 'child_process';
 
 export type AgentMessage = {
     role: 'user' | 'assistant';
@@ -24,13 +25,13 @@ export class CodeBuddySDKRuntime {
     private currentQuery: ReturnType<typeof query> | null = null;
     private pendingConfirmations: Map<string, { resolve: (approved: boolean) => void }> = new Map();
 
-    constructor(window: BrowserWindow, apiKey: string, internetEnv: string = '') {
+    constructor(window: BrowserWindow, apiKey: string, internetEnv: string = 'ioa') {
         this.windows = [window];
         this.apiKey = apiKey;
-        this.internetEnv = internetEnv;
+        this.internetEnv = internetEnv || 'ioa';  // Default to 'ioa' for internal network
         console.log('[CodeBuddySDKRuntime] Constructor called');
         console.log('[CodeBuddySDKRuntime] API Key:', apiKey ? '***' + apiKey.slice(-8) : 'NOT SET');
-        console.log('[CodeBuddySDKRuntime] Internet Env:', internetEnv || 'NOT SET');
+        console.log('[CodeBuddySDKRuntime] Internet Env:', this.internetEnv);
     }
 
     public addWindow(win: BrowserWindow) {
@@ -105,17 +106,56 @@ export class CodeBuddySDKRuntime {
 
         try {
             const authorizedFolders = permissionManager.getAuthorizedFolders();
-            const workingDir = authorizedFolders[0] || process.cwd();
+            if (authorizedFolders.length === 0) {
+                const errorMsg = '请先选择工作目录。点击左下角的文件夹图标选择一个项目目录。';
+                console.error('[CodeBuddySDKRuntime] No working directory configured');
+                this.history[this.history.length - 1] = {
+                    role: 'assistant',
+                    content: errorMsg
+                };
+                this.notifyUpdate();
+                this.broadcast('agent:complete', null);
+                this.isProcessing = false;
+                return;
+            }
+            const workingDir = authorizedFolders[0];
             console.log('[CodeBuddySDKRuntime] Working directory:', workingDir);
             console.log('[CodeBuddySDKRuntime] Starting query...');
 
             // 构建环境变量
-            const env: Record<string, string> = {};
+            const env: Record<string, string> = {
+                // Ensure PATH includes common node binary locations
+                PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin'
+            };
             if (this.apiKey) {
                 env.CODEBUDDY_API_KEY = this.apiKey;
             }
             if (this.internetEnv) {
                 env.CODEBUDDY_INTERNET_ENVIRONMENT = this.internetEnv;
+            }
+            
+            // Set CODEBUDDY_CODE_PATH in process.env for SDK to find the CLI
+            // The SDK reads from process.env directly, not from options.env
+            if (!process.env.CODEBUDDY_CODE_PATH) {
+                try {
+                    const extendedPath = `${process.env.PATH || ''}:/usr/local/bin:/opt/homebrew/bin:${process.env.HOME}/.nvm/versions/node/v22.15.1/bin`;
+                    const codebuddyPath = execSync('which codebuddy', { 
+                        encoding: 'utf-8',
+                        env: { ...process.env, PATH: extendedPath },
+                        shell: '/bin/bash'
+                    }).trim();
+                    if (codebuddyPath) {
+                        // Set in process.env so SDK can find it
+                        process.env.CODEBUDDY_CODE_PATH = codebuddyPath;
+                        process.env.PATH = extendedPath;
+                        env.PATH = extendedPath;
+                        console.log('[CodeBuddySDKRuntime] Set CODEBUDDY_CODE_PATH in process.env:', codebuddyPath);
+                    }
+                } catch (e) {
+                    console.error('[CodeBuddySDKRuntime] Failed to find codebuddy:', e);
+                }
+            } else {
+                console.log('[CodeBuddySDKRuntime] Using existing CODEBUDDY_CODE_PATH:', process.env.CODEBUDDY_CODE_PATH);
             }
 
             console.log('[CodeBuddySDKRuntime] Query options:', {

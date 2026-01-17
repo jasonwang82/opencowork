@@ -5,6 +5,7 @@ import react from '@vitejs/plugin-react'
 
 // https://vitejs.dev/config/
 export default defineConfig({
+  base: './',  // Use relative paths for Electron
   server: {
     host: '127.0.0.1',
   },
@@ -24,6 +25,10 @@ export default defineConfig({
                 '@modelcontextprotocol/sdk'
               ],
             },
+          },
+          // Polyfill __dirname for ESM compatibility (required by @tencent-ai/agent-sdk)
+          define: {
+            __dirname: 'import.meta.dirname',
           }
         }
       },

@@ -19,7 +19,23 @@ export interface AppConfig {
     integrationMode: IntegrationMode;
     codeBuddyApiKey: string;
     codeBuddyInternetEnv: string;
+    commandBlacklist: string[];  // Commands that are not allowed to execute
 }
+
+// Default dangerous commands that should be blocked
+const DEFAULT_COMMAND_BLACKLIST = [
+    'rm -rf',
+    'rm -r',
+    'rm -fr',
+    'rmdir',
+    'format',
+    'dd',
+    'mkfs',
+    ':>',       // Truncate file
+    '> /dev/',  // Write to device
+    'chmod 777',
+    'chmod -R 777',
+];
 
 const defaults: AppConfig = {
     apiKey: '',
@@ -31,7 +47,8 @@ const defaults: AppConfig = {
     allowedPermissions: [],
     integrationMode: 'cli-codebuddy',
     codeBuddyApiKey: '',
-    codeBuddyInternetEnv: 'ioa'
+    codeBuddyInternetEnv: 'ioa',
+    commandBlacklist: DEFAULT_COMMAND_BLACKLIST
 };
 
 class ConfigStore {
@@ -53,7 +70,12 @@ class ConfigStore {
     }
 
     getAll(): AppConfig {
-        return this.store.store;
+        const stored = this.store.store;
+        // Return config with defaults applied
+        return {
+            ...stored,
+            codeBuddyInternetEnv: this.getCodeBuddyInternetEnv()  // Use getter which has default 'ioa'
+        };
     }
 
     // API Key
@@ -185,6 +207,32 @@ class ConfigStore {
 
     setCodeBuddyInternetEnv(env: string): void {
         this.store.set('codeBuddyInternetEnv', env);
+    }
+
+    // Command Blacklist
+    getCommandBlacklist(): string[] {
+        return this.store.get('commandBlacklist') || DEFAULT_COMMAND_BLACKLIST;
+    }
+
+    setCommandBlacklist(commands: string[]): void {
+        this.store.set('commandBlacklist', commands);
+    }
+
+    addToBlacklist(command: string): void {
+        const blacklist = this.getCommandBlacklist();
+        if (!blacklist.includes(command)) {
+            blacklist.push(command);
+            this.store.set('commandBlacklist', blacklist);
+        }
+    }
+
+    removeFromBlacklist(command: string): void {
+        const blacklist = this.getCommandBlacklist().filter(c => c !== command);
+        this.store.set('commandBlacklist', blacklist);
+    }
+
+    resetBlacklistToDefault(): void {
+        this.store.set('commandBlacklist', DEFAULT_COMMAND_BLACKLIST);
     }
 }
 

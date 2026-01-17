@@ -54,12 +54,18 @@ export function CoworkView({ history, onSendMessage, onAbort, isProcessing, onOp
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [selectedImage, setSelectedImage] = useState<string | null>(null);
 
-    // Load config including model name
+    // Load initial working directory from authorized folders
     useEffect(() => {
-        window.ipcRenderer.invoke('config:get-all').then((cfg) => {
-            const config = cfg as { model?: string } | undefined;
-            if (config?.model) setModelName(config.model);
+        window.ipcRenderer.invoke('agent:get-authorized-folders').then((folders) => {
+            const folderList = folders as string[];
+            if (folderList && folderList.length > 0) {
+                setWorkingDir(folderList[0]);
+            }
         });
+    }, []);
+
+    // Setup listeners
+    useEffect(() => {
         // Listen for streaming tokens
         const removeStreamListener = window.ipcRenderer.on('agent:stream-token', (_event, ...args) => {
             const token = args[0] as string;
@@ -115,6 +121,12 @@ export function CoworkView({ history, onSendMessage, onAbort, isProcessing, onOp
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         if ((!input.trim() && images.length === 0) || isProcessing) return;
+
+        // Check if working directory is set (required for work mode)
+        if (mode === 'work' && !workingDir) {
+            alert('请先选择工作目录。点击左下角的文件夹图标选择一个项目目录。');
+            return;
+        }
 
         setStreamingText('');
 
@@ -432,7 +444,12 @@ export function CoworkView({ history, onSendMessage, onAbort, isProcessing, onOp
             <div className="flex-1 overflow-y-auto px-4 py-6" ref={scrollRef}>
                 <div className="max-w-xl mx-auto space-y-5">
                     {relevantHistory.length === 0 && !streamingText ? (
-                        <EmptyState mode={mode} workingDir={workingDir} />
+                        <EmptyState 
+                            mode={mode} 
+                            workingDir={workingDir} 
+                            onSelectFolder={handleSelectFolder}
+                            onOpenSettings={onOpenSettings}
+                        />
                     ) : (
                         <>
                             {relevantHistory.map((msg, idx) => (
@@ -736,26 +753,59 @@ function MessageItem({ message, expandedBlocks, toggleBlock, showTools, onImageC
     );
 }
 
-function EmptyState({ mode, workingDir }: { mode: Mode, workingDir: string | null }) {
+function EmptyState({ mode, workingDir, onSelectFolder, onOpenSettings }: { 
+    mode: Mode, 
+    workingDir: string | null,
+    onSelectFolder: () => void,
+    onOpenSettings: () => void 
+}) {
     const { t } = useI18n();
+
+    const handleSelectFolder = async () => {
+        onSelectFolder();
+    };
 
     return (
         <div className="flex flex-col items-center justify-center h-full text-center space-y-4 py-20">
             <div className="w-16 h-16 rounded-2xl bg-white shadow-lg flex items-center justify-center rotate-3 border border-stone-100 overflow-hidden">
-                <img src="/logo.png" alt="Logo" className="w-full h-full object-cover" />
+                <img src="./logo.png" alt="Logo" className="w-full h-full object-cover" />
             </div>
-            <div className="space-y-2">
+            <div className="space-y-3">
                 <h2 className="text-xl font-semibold text-stone-800">
                     {mode === 'chat' ? 'CodeBuddy Work Chat' : 'CodeBuddy Work'}
                 </h2>
-                <p className="text-stone-500 text-sm max-w-xs">
-                    {mode === 'work' && !workingDir
-                        ? '请先选择一个工作目录来开始任务'
-                        : mode === 'work' && workingDir
-                            ? `工作目录: ${workingDir.split(/[\\/]/).pop()}`
-                            : t('startByDescribing')
-                    }
-                </p>
+                {mode === 'work' && !workingDir ? (
+                    <div className="space-y-3">
+                        <p className="text-stone-500 text-sm max-w-xs">
+                            请先选择一个工作目录来开始任务
+                        </p>
+                        <button
+                            onClick={handleSelectFolder}
+                            className="inline-flex items-center gap-2 px-4 py-2 bg-brand-500 text-white rounded-lg hover:bg-brand-600 transition-colors text-sm font-medium"
+                        >
+                            <FolderOpen size={16} />
+                            选择工作目录
+                        </button>
+                        <p className="text-stone-400 text-xs">
+                            或在
+                            <button 
+                                onClick={onOpenSettings}
+                                className="text-brand-500 hover:underline mx-1"
+                            >
+                                设置
+                            </button>
+                            中配置 API Key
+                        </p>
+                    </div>
+                ) : mode === 'work' && workingDir ? (
+                    <p className="text-stone-500 text-sm max-w-xs">
+                        工作目录: {workingDir.split(/[\\/]/).pop()}
+                    </p>
+                ) : (
+                    <p className="text-stone-500 text-sm max-w-xs">
+                        {t('startByDescribing')}
+                    </p>
+                )}
             </div>
         </div>
     );

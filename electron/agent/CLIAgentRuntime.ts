@@ -29,6 +29,8 @@ interface CLIStreamMessage {
     };
     result?: string;
     is_error?: boolean;
+    error_message?: string;
+    error?: string;
 }
 
 /**
@@ -61,7 +63,10 @@ export class CLIAgentRuntime {
         
         // Check if codebuddy is available
         try {
-            const testProcess = spawn('codebuddy', ['--version'], { shell: false });
+            const testProcess = spawn('codebuddy', ['--version'], { 
+                shell: true,
+                env: { ...process.env, PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin' }
+            });
             testProcess.on('error', (err) => {
                 console.error('[CLIAgentRuntime] CodeBuddy CLI not found:', err);
                 this.broadcast('agent:error', 
@@ -152,7 +157,19 @@ export class CLIAgentRuntime {
 
     private async executeCodeBuddy(userMessage: string) {
         const authorizedFolders = permissionManager.getAuthorizedFolders();
-        const workingDir = authorizedFolders[0] || process.cwd();
+        if (authorizedFolders.length === 0) {
+            const errorMsg = '请先选择工作目录。点击左下角的文件夹图标选择一个项目目录。';
+            console.error('[CLIAgentRuntime] No working directory configured');
+            this.history.push({
+                role: 'assistant',
+                content: errorMsg
+            });
+            this.notifyUpdate();
+            this.broadcast('agent:complete', null);
+            this.isProcessing = false;
+            return;
+        }
+        const workingDir = authorizedFolders[0];
 
         // Build codebuddy command with arguments
         // CodeBuddy CLI usage: codebuddy -p --output-format stream-json --permission-mode bypassPermissions [--model MODEL] [prompt]
@@ -191,22 +208,36 @@ export class CLIAgentRuntime {
         this.notifyUpdate();
 
         return new Promise<void>((resolve, reject) => {
-            // 获取 CodeBuddy 特定的环境变量
-            const codeBuddyApiKey = process.env.CODEBUDDY_API_KEY || configStore.getApiKey() || process.env.ANTHROPIC_API_KEY || '';
-            const codeBuddyInternetEnv = process.env.CODEBUDDY_INTERNET_ENVIRONMENT || '';
-
-            console.log('[CLIAgentRuntime] Environment variables:');
-            console.log('[CLIAgentRuntime] CODEBUDDY_API_KEY:', codeBuddyApiKey ? '***' + codeBuddyApiKey.slice(-8) : 'NOT SET');
-            console.log('[CLIAgentRuntime] CODEBUDDY_INTERNET_ENVIRONMENT:', codeBuddyInternetEnv || 'NOT SET');
+            // For CLI mode, let CLI use its own credentials from ~/.codebuddy/
+            // Do NOT override with app settings - CLI has its own authentication system
+            
+            // Build env - inherit from process.env to preserve HOME, PATH, etc.
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const env: Record<string, any> = {
+                ...process.env,
+                PATH: `${process.env.PATH || ''}:/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:${process.env.HOME}/.nvm/versions/node/v22.15.1/bin`,
+            };
+            
+            // IMPORTANT: Do NOT set CODEBUDDY_API_KEY for CLI mode
+            // The CLI uses its own authentication from ~/.codebuddy/.credentials.json
+            // Setting this env var interferes with CLI's built-in auth
+            console.log('[CLIAgentRuntime] Using CLI native authentication from ~/.codebuddy/');
+            
+            // Remove any existing CODEBUDDY_API_KEY to ensure CLI uses its own config
+            delete env.CODEBUDDY_API_KEY;
+            
+            // Also don't override internet environment - let CLI use its config
+            delete env.CODEBUDDY_INTERNET_ENVIRONMENT;
+            
+            console.log('[CLIAgentRuntime] Environment:');
+            console.log('[CLIAgentRuntime] HOME:', env.HOME);
+            console.log('[CLIAgentRuntime] CODEBUDDY_API_KEY: NOT SET (using CLI native auth)');
+            console.log('[CLIAgentRuntime] CODEBUDDY_INTERNET_ENVIRONMENT: NOT SET (using CLI config)');
 
             this.currentProcess = spawn('codebuddy', args, {
                 cwd: workingDir,
-                shell: false, // Use shell: false for better security
-                env: {
-                    ...process.env,
-                    CODEBUDDY_API_KEY: codeBuddyApiKey,
-                    CODEBUDDY_INTERNET_ENVIRONMENT: codeBuddyInternetEnv,
-                }
+                shell: true, // Use shell: true to find codebuddy in PATH
+                env: env as NodeJS.ProcessEnv
             });
 
             let jsonBuffer = '';
@@ -309,6 +340,11 @@ export class CLIAgentRuntime {
         try {
             console.log('[CLIAgentRuntime] Stream message:', msg.type, msg.subtype || '');
             
+            // Print full message details for debugging errors
+            if (msg.type === 'result' && (msg.subtype === 'error_during_execution' || msg.is_error)) {
+                console.error('[CLIAgentRuntime] Error details:', JSON.stringify(msg, null, 2));
+            }
+            
             if (msg.type === 'system' && msg.subtype === 'init') {
                 // System initialization - broadcast start
                 this.broadcast('agent:cli-progress', {
@@ -383,11 +419,17 @@ export class CLIAgentRuntime {
                 }
             } else if (msg.type === 'result') {
                 // Final result
+                const errorMsg = msg.error_message || msg.error || msg.result;
                 this.broadcast('agent:cli-progress', {
                     type: 'complete',
-                    message: '执行完成',
+                    message: msg.is_error ? `错误: ${errorMsg}` : '执行完成',
                     is_error: msg.is_error
                 });
+                
+                // If there's an error, also stream it to the UI
+                if (msg.is_error && errorMsg) {
+                    this.broadcast('agent:stream-token', `\n\n❌ 错误: ${errorMsg}`);
+                }
             }
         } catch (err) {
             console.error('[CLIAgentRuntime] Error handling stream message:', err);

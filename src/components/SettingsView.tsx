@@ -63,12 +63,40 @@ export function SettingsView({ onClose }: SettingsViewProps) {
     // Permissions State
     const [permissions, setPermissions] = useState<ToolPermission[]>([]);
 
+    // Command Blacklist State
+    const [blacklist, setBlacklist] = useState<string[]>([]);
+    const [newBlacklistCommand, setNewBlacklistCommand] = useState('');
+
     // CodeBuddy Install State
     const [isInstalling, setIsInstalling] = useState(false);
     const [installStatus, setInstallStatus] = useState<string | null>(null);
 
     const loadPermissions = () => {
         window.ipcRenderer.invoke('permissions:list').then(list => setPermissions(list as ToolPermission[]));
+    };
+
+    const loadBlacklist = () => {
+        window.ipcRenderer.invoke('blacklist:get').then(list => setBlacklist(list as string[]));
+    };
+
+    const addToBlacklist = async () => {
+        const command = newBlacklistCommand.trim();
+        if (!command) return;
+        await window.ipcRenderer.invoke('blacklist:add', command);
+        setNewBlacklistCommand('');
+        loadBlacklist();
+    };
+
+    const removeFromBlacklist = async (command: string) => {
+        await window.ipcRenderer.invoke('blacklist:remove', command);
+        loadBlacklist();
+    };
+
+    const resetBlacklist = async () => {
+        if (confirm('确定要恢复默认黑名单吗？')) {
+            await window.ipcRenderer.invoke('blacklist:reset');
+            loadBlacklist();
+        }
     };
 
     const revokePermission = async (tool: string, pathPattern?: string) => {
@@ -96,6 +124,7 @@ export function SettingsView({ onClose }: SettingsViewProps) {
             refreshSkills();
         } else if (activeTab === 'advanced') {
             loadPermissions();
+            loadBlacklist();
         }
     }, [activeTab]);
 
@@ -598,6 +627,56 @@ export function SettingsView({ onClose }: SettingsViewProps) {
                                             </button>
                                         </div>
                                     )}
+                                </div>
+
+                                {/* Command Blacklist Management */}
+                                <div className="space-y-2">
+                                    <div className="flex items-center justify-between">
+                                        <p className="text-sm font-medium text-stone-700">命令黑名单</p>
+                                        <button
+                                            onClick={resetBlacklist}
+                                            className="text-xs text-brand-500 hover:text-brand-600"
+                                        >
+                                            恢复默认
+                                        </button>
+                                    </div>
+                                    <p className="text-xs text-stone-400">
+                                        包含以下模式的命令将被禁止执行（如 rm -rf、format 等危险操作）
+                                    </p>
+                                    
+                                    {/* Add new command to blacklist */}
+                                    <div className="flex gap-2">
+                                        <input
+                                            type="text"
+                                            value={newBlacklistCommand}
+                                            onChange={(e) => setNewBlacklistCommand(e.target.value)}
+                                            onKeyDown={(e) => e.key === 'Enter' && addToBlacklist()}
+                                            placeholder="输入要禁用的命令模式..."
+                                            className="flex-1 px-3 py-2 text-sm border border-stone-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500"
+                                        />
+                                        <button
+                                            onClick={addToBlacklist}
+                                            disabled={!newBlacklistCommand.trim()}
+                                            className="px-3 py-2 text-sm font-medium text-white bg-brand-500 rounded-lg hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                                        >
+                                            添加
+                                        </button>
+                                    </div>
+                                    
+                                    {/* Blacklist items */}
+                                    <div className="space-y-1 max-h-48 overflow-y-auto">
+                                        {blacklist.map((cmd, idx) => (
+                                            <div key={idx} className="flex items-center justify-between p-2 bg-red-50 border border-red-100 rounded-lg">
+                                                <code className="text-sm font-mono text-red-700">{cmd}</code>
+                                                <button
+                                                    onClick={() => removeFromBlacklist(cmd)}
+                                                    className="px-2 py-1 text-xs text-red-600 hover:bg-red-100 rounded"
+                                                >
+                                                    移除
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
                                 </div>
                             </>
                         )}
