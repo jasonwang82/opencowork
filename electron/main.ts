@@ -686,20 +686,119 @@ ipcMain.handle('skills:delete', async (_, skillId: string) => {
 });
 
 // Plugin Marketplace Handlers
+/**
+ * Find the system Node.js executable path
+ * This ensures we use the system Node.js instead of Electron's built-in Node.js
+ */
+function findSystemNodePath(): string | null {
+  const home = process.env.HOME || '';
+  const possiblePaths = [
+    // NVM paths (prioritize latest version)
+    ...(fs.existsSync(`${home}/.nvm/versions/node`) 
+      ? fs.readdirSync(`${home}/.nvm/versions/node`)
+          .filter((v: string) => v.startsWith('v'))
+          .sort()
+          .reverse()
+          .map((v: string) => `${home}/.nvm/versions/node/${v}/bin/node`)
+      : []),
+    // Standard installation paths
+    '/usr/local/bin/node',
+    '/opt/homebrew/bin/node',
+    '/usr/bin/node',
+    // Try to find from current PATH
+    process.env.PATH?.split(':')
+      .map((p: string) => path.join(p, 'node'))
+      .find((p: string) => fs.existsSync(p)) || null
+  ].filter(Boolean) as string[];
+
+  for (const nodePath of possiblePaths) {
+    if (nodePath && fs.existsSync(nodePath)) {
+      try {
+        // Verify it's executable
+        fs.accessSync(nodePath, fs.constants.F_OK | fs.constants.X_OK);
+        return nodePath;
+      } catch {
+        continue;
+      }
+    }
+  }
+  
+  return null;
+}
+
+/**
+ * Find the codebuddy command path
+ */
+function findCodeBuddyPath(nodePath: string): string | null {
+  const nodeDir = path.dirname(nodePath);
+  const codebuddyPath = path.join(nodeDir, 'codebuddy');
+  
+  if (fs.existsSync(codebuddyPath)) {
+    return codebuddyPath;
+  }
+  
+  // Fallback: try to find in PATH
+  const home = process.env.HOME || '';
+  const possiblePaths = [
+    `${home}/.npm-global/bin/codebuddy`,
+    `${home}/node_modules/.bin/codebuddy`,
+    '/usr/local/bin/codebuddy',
+    '/opt/homebrew/bin/codebuddy',
+    '/usr/local/lib/node_modules/.bin/codebuddy'
+  ];
+  
+  for (const p of possiblePaths) {
+    if (fs.existsSync(p)) {
+      return p;
+    }
+  }
+  
+  return null;
+}
+
 const executeCodeBuddyCommand = (args: string[]): Promise<{ success: boolean; output?: string; error?: string }> => {
   return new Promise((resolve) => {
     const home = process.env.HOME || '';
+    
+    // Find system Node.js path
+    const systemNodePath = findSystemNodePath();
+    if (!systemNodePath) {
+      logger.error('Failed to find system Node.js');
+      resolve({ success: false, error: 'Failed to find system Node.js. Please ensure Node.js is installed.' });
+      return;
+    }
+    
+    logger.info('Using system Node.js', { path: systemNodePath });
+    
+    // Find codebuddy path
+    const codebuddyPath = findCodeBuddyPath(systemNodePath);
+    if (!codebuddyPath) {
+      logger.error('Failed to find codebuddy command');
+      resolve({ success: false, error: 'Failed to find codebuddy command. Please ensure CodeBuddy CLI is installed.' });
+      return;
+    }
+    
+    logger.info('Using codebuddy', { path: codebuddyPath });
+    
+    // Build PATH environment with system Node.js first
     const nvmDir = `${home}/.nvm/versions/node`;
     const standardPaths = '/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin';
     const nvmPaths = fs.existsSync(nvmDir)
       ? fs.readdirSync(nvmDir).filter((v: string) => v.startsWith('v')).map((v: string) => `${nvmDir}/${v}/bin`).join(':')
       : '';
     const npmPaths = `${home}/.npm-global/bin:${home}/node_modules/.bin:/usr/local/lib/node_modules/.bin`;
-    const pathEnv = `${nvmPaths}:${npmPaths}:${process.env.PATH || ''}:${standardPaths}`;
+    const pathEnv = `${path.dirname(systemNodePath)}:${nvmPaths}:${npmPaths}:${process.env.PATH || ''}:${standardPaths}`;
 
-    const codebuddyProcess = spawn('codebuddy', args, {
-      shell: true,
-      env: { ...process.env, PATH: pathEnv, HOME: home }
+    // Use system Node.js to execute codebuddy script
+    // This ensures codebuddy uses the system Node.js version, not Electron's
+    const codebuddyProcess = spawn(systemNodePath, [codebuddyPath, ...args], {
+      env: { 
+        ...process.env, 
+        PATH: pathEnv, 
+        HOME: home,
+        // Explicitly set NODE environment to system Node.js
+        NODE: systemNodePath
+      }
     });
 
     let stdout = '';
