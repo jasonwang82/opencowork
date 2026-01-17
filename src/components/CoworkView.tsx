@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Square, ArrowUp, ChevronDown, ChevronUp, Download, FolderOpen, MessageCircle, Zap, AlertTriangle, Check, X, Settings, History, Plus, Trash2 } from 'lucide-react';
+import { Square, ArrowUp, ChevronDown, ChevronUp, Download, FolderOpen, MessageCircle, Zap, AlertTriangle, Check, X, Settings, Plus } from 'lucide-react';
 import { useI18n } from '../i18n/I18nContext';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import Anthropic from '@anthropic-ai/sdk';
@@ -11,13 +11,6 @@ interface PermissionRequest {
     tool: string;
     description: string;
     args: Record<string, unknown>;
-}
-
-interface SessionSummary {
-    id: string;
-    title: string;
-    createdAt: number;
-    updatedAt: number;
 }
 
 interface CLIProgress {
@@ -35,9 +28,17 @@ interface CoworkViewProps {
     onAbort: () => void;
     isProcessing: boolean;
     onOpenSettings: () => void;
+    onNewWindow?: () => void;
 }
 
-export function CoworkView({ history, onSendMessage, onAbort, isProcessing, onOpenSettings }: CoworkViewProps) {
+export function CoworkView({ 
+    history, 
+    onSendMessage, 
+    onAbort, 
+    isProcessing, 
+    onOpenSettings,
+    onNewWindow
+}: CoworkViewProps) {
     const [input, setInput] = useState('');
     const [images, setImages] = useState<string[]>([]); // Base64 strings
     const [mode, setMode] = useState<Mode>('work');
@@ -45,11 +46,11 @@ export function CoworkView({ history, onSendMessage, onAbort, isProcessing, onOp
     const [streamingText, setStreamingText] = useState('');
     const [progressMessages, setProgressMessages] = useState<CLIProgress[]>([]);
     const [workingDir, setWorkingDir] = useState<string | null>(null);
+    const [authorizedFolders, setAuthorizedFolders] = useState<string[]>([]);
+    const [showWorkspacePicker, setShowWorkspacePicker] = useState(false);
     const [permissionRequest, setPermissionRequest] = useState<PermissionRequest | null>(null);
-    const [showHistory, setShowHistory] = useState(false);
-    const [sessions, setSessions] = useState<SessionSummary[]>([]);
-    const [isCreatingSession, setIsCreatingSession] = useState(false);
     const scrollRef = useRef<HTMLDivElement>(null);
+    const workspacePickerRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [selectedImage, setSelectedImage] = useState<string | null>(null);
@@ -58,11 +59,29 @@ export function CoworkView({ history, onSendMessage, onAbort, isProcessing, onOp
     useEffect(() => {
         window.ipcRenderer.invoke('agent:get-authorized-folders').then((folders) => {
             const folderList = folders as string[];
+            setAuthorizedFolders(folderList || []);
             if (folderList && folderList.length > 0) {
                 setWorkingDir(folderList[0]);
             }
         });
     }, []);
+
+    // Close workspace picker when clicking outside
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (workspacePickerRef.current && !workspacePickerRef.current.contains(event.target as Node)) {
+                setShowWorkspacePicker(false);
+            }
+        };
+        
+        if (showWorkspacePicker) {
+            document.addEventListener('mousedown', handleClickOutside);
+        }
+        
+        return () => {
+            document.removeEventListener('mousedown', handleClickOutside);
+        };
+    }, [showWorkspacePicker]);
 
     // Setup listeners
     useEffect(() => {
@@ -102,15 +121,6 @@ export function CoworkView({ history, onSendMessage, onAbort, isProcessing, onOp
             removeConfirmListener?.();
         };
     }, []);
-
-    // Fetch session list when history panel is opened
-    useEffect(() => {
-        if (showHistory) {
-            window.ipcRenderer.invoke('session:list').then((list) => {
-                setSessions(list as SessionSummary[]);
-            });
-        }
-    }, [showHistory]);
 
     useEffect(() => {
         if (scrollRef.current) {
@@ -296,63 +306,113 @@ export function CoworkView({ history, onSendMessage, onAbort, isProcessing, onOp
             )}
 
             {/* Top Bar with Mode Tabs and Settings */}
-            <div className="border-b border-stone-200 bg-white px-6 py-2.5 flex items-center justify-between shrink-0">
+            <div className="border-b border-stone-200 bg-white px-4 py-2.5 flex items-center justify-between shrink-0">
                 <div className="flex items-center gap-3">
+                    {/* New Window Button */}
+                    {onNewWindow && (
+                        <button
+                            onClick={onNewWindow}
+                            className="p-1.5 text-stone-500 hover:text-stone-700 hover:bg-stone-100 rounded-lg transition-colors"
+                            title="新建窗口 (Ctrl+N)"
+                        >
+                            <Plus size={18} />
+                        </button>
+                    )}
+
                     {/* Mode Tabs */}
                     <div className="flex items-center gap-0.5 bg-stone-100 rounded-lg p-0.5">
-                        <button
-                            onClick={() => setMode('chat')}
-                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${mode === 'chat' ? 'bg-white text-stone-800 shadow-sm' : 'text-stone-500 hover:text-stone-700'
-                                }`}
-                        >
-                            <MessageCircle size={14} />
-                            Chat
-                        </button>
-                        <button
-                            onClick={() => setMode('work')}
-                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${mode === 'work' ? 'bg-white text-stone-800 shadow-sm' : 'text-stone-500 hover:text-stone-700'
-                                }`}
-                        >
-                            <Zap size={14} />
-                            Work
-                        </button>
+                            <button
+                                onClick={() => setMode('chat')}
+                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${mode === 'chat' ? 'bg-white text-stone-800 shadow-sm' : 'text-stone-500 hover:text-stone-700'
+                                    }`}
+                            >
+                                <MessageCircle size={14} />
+                                Chat
+                            </button>
+                            <button
+                                onClick={() => setMode('work')}
+                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${mode === 'work' ? 'bg-white text-stone-800 shadow-sm' : 'text-stone-500 hover:text-stone-700'
+                                    }`}
+                            >
+                                <Zap size={14} />
+                                Work
+                            </button>
+                        </div>
                     </div>
-                </div>
 
-                {/* History + Settings */}
+                {/* Working Dir + Settings */}
                 <div className="flex items-center gap-2">
-                    {workingDir && (
-                        <span className="text-xs text-stone-400 truncate max-w-32">
-                            📂 {workingDir.split(/[\\/]/).pop()}
-                        </span>
-                    )}
-                    <div className="flex items-center gap-1">
+                    {/* Workspace Picker */}
+                    <div className="relative" ref={workspacePickerRef}>
                         <button
-                            onClick={async () => {
-                                if (isCreatingSession || isProcessing) return;
-                                setIsCreatingSession(true);
-                                try {
-                                    await window.ipcRenderer.invoke('agent:new-session');
-                                    setProgressMessages([]);
-                                    setStreamingText('');
-                                } finally {
-                                    setIsCreatingSession(false);
-                                }
-                            }}
-                            disabled={isCreatingSession || isProcessing}
-                            className={`p-1.5 text-stone-400 hover:text-stone-600 hover:bg-stone-100 rounded-lg transition-colors ${isCreatingSession ? 'opacity-50 cursor-not-allowed' : ''}`}
-                            title="新会话"
+                            onClick={() => setShowWorkspacePicker(!showWorkspacePicker)}
+                            className="flex items-center gap-1 px-2 py-1 text-xs text-stone-500 hover:text-stone-700 hover:bg-stone-100 rounded-md transition-colors border border-transparent hover:border-stone-200"
+                            title="切换工作目录"
                         >
-                            <Plus size={16} />
+                            <FolderOpen size={14} />
+                            <span className="truncate max-w-24">
+                                {workingDir ? workingDir.split(/[\\/]/).pop() : '选择目录'}
+                            </span>
+                            <ChevronDown size={12} className={`transition-transform ${showWorkspacePicker ? 'rotate-180' : ''}`} />
                         </button>
-                        <button
-                            onClick={() => setShowHistory(!showHistory)}
-                            className={`p-1.5 text-stone-400 hover:text-stone-600 hover:bg-stone-100 rounded-lg transition-colors ${showHistory ? 'bg-stone-100 text-stone-600' : ''}`}
-                            title="历史记录"
-                        >
-                            <History size={16} />
-                        </button>
+                        
+                        {/* Workspace Dropdown */}
+                        {showWorkspacePicker && (
+                            <div className="absolute right-0 top-full mt-1 z-30 w-64 bg-white rounded-lg shadow-xl border border-stone-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+                                <div className="px-3 py-2 border-b border-stone-100 bg-stone-50/50">
+                                    <span className="text-xs font-medium text-stone-600">工作目录</span>
+                                </div>
+                                <div className="max-h-48 overflow-y-auto py-1">
+                                    {authorizedFolders.length === 0 ? (
+                                        <div className="px-3 py-4 text-center text-xs text-stone-400">
+                                            暂无已授权的目录
+                                        </div>
+                                    ) : (
+                                        authorizedFolders.map((folder, idx) => (
+                                            <button
+                                                key={folder}
+                                                onClick={async () => {
+                                                    await window.ipcRenderer.invoke('agent:set-working-dir', folder);
+                                                    setWorkingDir(folder);
+                                                    setShowWorkspacePicker(false);
+                                                }}
+                                                className={`w-full flex items-center gap-2 px-3 py-2 text-xs text-left hover:bg-stone-50 transition-colors ${folder === workingDir ? 'bg-brand-50 text-brand-600' : 'text-stone-600'}`}
+                                            >
+                                                <FolderOpen size={14} className={folder === workingDir ? 'text-brand-500' : 'text-stone-400'} />
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="font-medium truncate">{folder.split(/[\\/]/).pop()}</div>
+                                                    <div className="text-[10px] text-stone-400 truncate">{folder}</div>
+                                                </div>
+                                                {idx === 0 && folder === workingDir && (
+                                                    <span className="text-[10px] text-brand-500 bg-brand-100 px-1.5 py-0.5 rounded">当前</span>
+                                                )}
+                                            </button>
+                                        ))
+                                    )}
+                                </div>
+                                <div className="border-t border-stone-100 p-2">
+                                    <button
+                                        onClick={async () => {
+                                            const folder = await window.ipcRenderer.invoke('dialog:select-folder') as string | null;
+                                            if (folder) {
+                                                await window.ipcRenderer.invoke('agent:set-working-dir', folder);
+                                                setWorkingDir(folder);
+                                                // Refresh authorized folders
+                                                const folders = await window.ipcRenderer.invoke('agent:get-authorized-folders') as string[];
+                                                setAuthorizedFolders(folders || []);
+                                                setShowWorkspacePicker(false);
+                                            }
+                                        }}
+                                        className="w-full flex items-center justify-center gap-1 px-3 py-1.5 text-xs text-brand-600 hover:bg-brand-50 rounded-md transition-colors"
+                                    >
+                                        <FolderOpen size={12} />
+                                        添加新目录
+                                    </button>
+                                </div>
+                            </div>
+                        )}
                     </div>
+                    
                     <button
                         onClick={onOpenSettings}
                         className="p-1.5 text-stone-400 hover:text-stone-600 hover:bg-stone-100 rounded-lg transition-colors"
@@ -362,83 +422,6 @@ export function CoworkView({ history, onSendMessage, onAbort, isProcessing, onOp
                     </button>
                 </div>
             </div>
-
-            {/* History Panel - Floating Popover */}
-            {showHistory && (
-                <div className="absolute top-12 right-6 z-20 w-80 bg-white rounded-xl shadow-xl border border-stone-200 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-                    <div className="flex items-center justify-between px-4 py-3 border-b border-stone-100 bg-stone-50/50">
-                        <div className="flex items-center gap-2">
-                            <History size={14} className="text-brand-500" />
-                            <span className="text-sm font-semibold text-stone-700">历史任务</span>
-                        </div>
-                        <button
-                            onClick={() => setShowHistory(false)}
-                            className="p-1 text-stone-400 hover:text-stone-600 hover:bg-stone-100 rounded-lg transition-colors"
-                        >
-                            <X size={14} />
-                        </button>
-                    </div>
-
-                    <div className="max-h-[320px] overflow-y-auto p-2">
-                        {sessions.length === 0 ? (
-                            <div className="py-8 text-center">
-                                <p className="text-sm text-stone-400">暂无历史会话</p>
-                            </div>
-                        ) : (
-                            <div className="space-y-1">
-                                {sessions.map((session) => (
-                                    <div
-                                        key={session.id}
-                                        className="group relative p-3 rounded-lg hover:bg-stone-50 transition-colors border border-transparent hover:border-stone-100 cursor-pointer"
-                                        onClick={() => {
-                                            window.ipcRenderer.invoke('session:load', session.id);
-                                            setProgressMessages([]);
-                                            setStreamingText('');
-                                            setShowHistory(false);
-                                        }}
-                                    >
-                                        <p className="text-xs font-medium text-stone-700 line-clamp-2 leading-relaxed">
-                                            {session.title}
-                                        </p>
-                                        <p className="text-[10px] text-stone-400 mt-1">
-                                            {new Date(session.updatedAt).toLocaleString('zh-CN', {
-                                                month: 'short',
-                                                day: 'numeric',
-                                                hour: '2-digit',
-                                                minute: '2-digit'
-                                            })}
-                                        </p>
-                                        <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                            <button
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    window.ipcRenderer.invoke('session:load', session.id);
-                                                    setProgressMessages([]);
-                                                    setStreamingText('');
-                                                    setShowHistory(false);
-                                                }}
-                                                className="text-[10px] flex items-center gap-1 text-brand-500 hover:text-brand-600 bg-brand-50 px-2 py-0.5 rounded-full"
-                                            >
-                                                加载
-                                            </button>
-                                            <button
-                                                onClick={async (e) => {
-                                                    e.stopPropagation();
-                                                    await window.ipcRenderer.invoke('session:delete', session.id);
-                                                    setSessions(sessions.filter(s => s.id !== session.id));
-                                                }}
-                                                className="p-1 text-stone-400 hover:text-red-500 transition-colors"
-                                            >
-                                                <Trash2 size={12} />
-                                            </button>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-                    </div>
-                </div>
-            )}
 
             {/* Messages Area - Narrower for better readability */}
             <div className="flex-1 overflow-y-auto px-4 py-6" ref={scrollRef}>
@@ -772,7 +755,7 @@ function EmptyState({ mode, workingDir, onSelectFolder, onOpenSettings }: {
             </div>
             <div className="space-y-3">
                 <h2 className="text-xl font-semibold text-stone-800">
-                    {mode === 'chat' ? 'WorkBuddy Chat' : 'WorkBuddy'}
+                    WorkBuddy
                 </h2>
                 {mode === 'work' && !workingDir ? (
                     <div className="space-y-3">

@@ -466,4 +466,19 @@ ${skillInfo.instructions}
     public abort() {
         this.abortController?.abort();
     }
+
+    // Get a copy of the current history
+    public getHistory(): Anthropic.MessageParam[] {
+        return [...this.history];
+    }
+
+    // Cleanup resources when switching sessions
+    public cleanup(): void {
+        this.abort();
+        this.history = [];
+        this.artifacts = [];
+        this.pendingConfirmations.clear();
+        this.isProcessing = false;
+        this.abortController = null;
+    }
 }

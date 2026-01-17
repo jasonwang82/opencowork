@@ -465,4 +465,18 @@ export class CodeBuddySDKRuntime {
     private notifyUpdate() {
         this.broadcast('agent:history-update', this.history);
     }
+
+    // Get a copy of the current history
+    public getHistory(): Anthropic.MessageParam[] {
+        return [...this.history];
+    }
+
+    // Cleanup resources when switching sessions
+    public cleanup(): void {
+        this.abort();
+        this.history = [];
+        this.pendingConfirmations.clear();
+        this.isProcessing = false;
+        this.currentQuery = null;
+    }
 }

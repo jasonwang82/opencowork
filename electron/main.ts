@@ -5,9 +5,7 @@ import os from 'node:os'
 import fs from 'node:fs'
 import { spawn } from 'node:child_process'
 import dotenv from 'dotenv'
-import { AgentRuntime } from './agent/AgentRuntime'
-import { CLIAgentRuntime } from './agent/CLIAgentRuntime'
-import { CodeBuddySDKRuntime } from './agent/CodeBuddySDKRuntime'
+import { agentManager } from './agent/AgentManager'
 import { configStore } from './config/ConfigStore'
 import { sessionStore } from './config/SessionStore'
 import { logger, getLogs, clearLogs } from './utils/logger'
@@ -110,7 +108,7 @@ if (VITE_DEV_SERVER_URL) {
 let mainWin: BrowserWindow | null = null
 let floatingBallWin: BrowserWindow | null = null
 let tray: Tray | null = null
-let agent: AgentRuntime | CLIAgentRuntime | CodeBuddySDKRuntime | null = null
+// Note: agent instances are now managed by AgentManager, one per session
 
 // Ball state
 let isBallExpanded = false
@@ -120,6 +118,8 @@ const EXPANDED_HEIGHT = 320   // Compact height for less dramatic expansion
 
 app.on('before-quit', () => {
   app.isQuitting = true
+  // Clean up all agents on quit
+  agentManager.destroyAll()
 })
 
 app.on('window-all-closed', () => {
@@ -129,8 +129,14 @@ app.on('window-all-closed', () => {
 })
 
 app.on('activate', () => {
-  if (BrowserWindow.getAllWindows().length === 0) {
-    createMainWindow()
+  // On macOS, re-create a window when dock icon is clicked and no windows are open
+  const sessionWindows = BrowserWindow.getAllWindows().filter(w => w !== floatingBallWin)
+  if (sessionWindows.length === 0) {
+    createSessionWindow()
+  } else {
+    // Show the first available window
+    sessionWindows[0].show()
+    sessionWindows[0].focus()
   }
 })
 
@@ -209,14 +215,22 @@ app.whenReady().then(() => {
   // 1. Setup IPC handlers FIRST
   // setupIPCHandlers() - handlers are defined at top level now
 
-  // 2. Create windows
+  // 2. Create windows (each window is registered with AgentManager in createSessionWindow)
   createMainWindow()
   createFloatingBallWindow()
 
-  // 3. Initialize agent AFTER windows are created
-  initializeAgent()
+  // 3. Set up floating ball with AgentManager
+  if (floatingBallWin) {
+    agentManager.setFloatingBallWindow(floatingBallWin)
+  }
 
-  // 4. Create system tray
+  // 4. Register keyboard shortcut for new window (Cmd/Ctrl+N)
+  globalShortcut.register('CommandOrControl+N', () => {
+    console.log('[main] Cmd/Ctrl+N pressed - creating new window')
+    createSessionWindow()
+  })
+
+  // 5. Create system tray
   createTray()
 
   // 5. Register global shortcut
@@ -247,27 +261,53 @@ app.whenReady().then(() => {
 
 // IPC Handlers
 
-ipcMain.handle('agent:send-message', async (_event, message: string | { content: string, images: string[] }) => {
+ipcMain.handle('agent:send-message', async (_event, payload: { sessionId: string, message: string | { content: string, images: string[] } }) => {
+  const { sessionId, message } = payload
+  const agent = agentManager.getOrCreateAgent(sessionId)
   if (!agent) throw new Error('Agent not initialized')
   return await agent.processUserMessage(message)
 })
 
-ipcMain.handle('agent:abort', () => {
-  agent?.abort()
+ipcMain.handle('agent:abort', (_, sessionId?: string) => {
+  if (sessionId) {
+    // Abort specific session
+    const agent = agentManager.getAgent(sessionId)
+    agent?.abort()
+  } else {
+    // Fallback: abort current session (legacy support)
+    const currentId = sessionStore.getCurrentSessionId()
+    if (currentId) {
+      const agent = agentManager.getAgent(currentId)
+      agent?.abort()
+    }
+  }
 })
 
-ipcMain.handle('agent:confirm-response', (_, { id, approved, remember, tool, path }: { id: string, approved: boolean, remember?: boolean, tool?: string, path?: string }) => {
+ipcMain.handle('agent:confirm-response', (_, { id, approved, remember, tool, path, sessionId }: { id: string, approved: boolean, remember?: boolean, tool?: string, path?: string, sessionId?: string }) => {
   if (approved && remember && tool) {
     configStore.addPermission(tool, path)
     console.log(`[Permission] Saved: ${tool} for path: ${path || '*'}`)
   }
-  agent?.handleConfirmResponse(id, approved)
+  // Find the right agent - use sessionId if provided, otherwise use current
+  const targetSessionId = sessionId || sessionStore.getCurrentSessionId()
+  if (targetSessionId) {
+    const agent = agentManager.getAgent(targetSessionId)
+    agent?.handleConfirmResponse(id, approved)
+  }
 })
 
+// Create a new session window (multi-window mode)
+ipcMain.handle('window:new-session', () => {
+  console.log('[main] Creating new session window...')
+  const win = createSessionWindow()
+  return { success: true, windowId: win.id }
+})
+
+// Legacy handler for compatibility - now creates a new window
 ipcMain.handle('agent:new-session', () => {
-  agent?.clearHistory()
-  const session = sessionStore.createSession()
-  return { success: true, sessionId: session.id }
+  console.log('[main] agent:new-session - creating new window...')
+  const win = createSessionWindow()
+  return { success: true, windowId: win.id }
 })
 
 // Session Management
@@ -281,10 +321,14 @@ ipcMain.handle('session:get', (_, id: string) => {
 
 ipcMain.handle('session:load', (_, id: string) => {
   const session = sessionStore.getSession(id)
-  if (session && agent) {
-    agent.loadHistory(session.messages)
-    sessionStore.setCurrentSession(id)
-    return { success: true }
+  if (session) {
+    // Get or create agent for this session
+    const agent = agentManager.getOrCreateAgent(id)
+    if (agent) {
+      agent.loadHistory(session.messages)
+      sessionStore.setCurrentSession(id)
+      return { success: true }
+    }
   }
   return { error: 'Session not found' }
 })
@@ -302,6 +346,8 @@ ipcMain.handle('session:save', (_, messages: Anthropic.MessageParam[]) => {
 })
 
 ipcMain.handle('session:delete', (_, id: string) => {
+  // Destroy the agent for this session if it exists
+  agentManager.destroyAgent(id)
   sessionStore.deleteSession(id)
   return { success: true }
 })
@@ -309,6 +355,46 @@ ipcMain.handle('session:delete', (_, id: string) => {
 ipcMain.handle('session:current', () => {
   const id = sessionStore.getCurrentSessionId()
   return id ? sessionStore.getSession(id) : null
+})
+
+// Session switch - with multi-agent concurrency, each session has its own agent
+// We just need to save current session and switch the active session ID
+ipcMain.handle('session:switch', async (_, targetSessionId: string) => {
+  console.log('[main] Switching session to:', targetSessionId)
+  
+  try {
+    // 1. Save current session state
+    const currentId = sessionStore.getCurrentSessionId()
+    if (currentId) {
+      const currentAgent = agentManager.getAgent(currentId)
+      if (currentAgent) {
+        const history = currentAgent.getHistory()
+        sessionStore.updateSession(currentId, history)
+        console.log('[main] Saved current session:', currentId, 'messages:', history.length)
+      }
+    }
+    
+    // 2. Load target session and its agent (create on-demand if needed)
+    const session = sessionStore.getSession(targetSessionId)
+    if (session) {
+      const targetAgent = agentManager.getOrCreateAgent(targetSessionId)
+      if (targetAgent) {
+        // Load history if agent is new (history is empty)
+        if (targetAgent.getHistory().length === 0 && session.messages.length > 0) {
+          targetAgent.loadHistory(session.messages)
+        }
+      }
+      sessionStore.setCurrentSession(targetSessionId)
+      console.log('[main] Switched to session:', targetSessionId, 'messages:', session.messages.length)
+      return { success: true, session }
+    } else {
+      console.error('[main] Session not found:', targetSessionId)
+      return { success: false, error: 'Session not found' }
+    }
+  } catch (err) {
+    console.error('[main] Session switch error:', err)
+    return { success: false, error: (err as Error).message }
+  }
 })
 
 ipcMain.handle('agent:authorize-folder', (_, folderPath: string) => {
@@ -381,8 +467,9 @@ ipcMain.handle('config:set-all', (_, cfg) => {
   if (cfg.codeBuddyApiKey !== undefined) configStore.setCodeBuddyApiKey(cfg.codeBuddyApiKey)
   if (cfg.codeBuddyInternetEnv !== undefined) configStore.setCodeBuddyInternetEnv(cfg.codeBuddyInternetEnv)
 
-  // Reinitialize agent
-  initializeAgent()
+  // Destroy all agents so they get recreated with new settings
+  agentManager.destroyAll()
+  console.log('[main] Settings saved, agents will be recreated with new config on next message')
 })
 
 // Log viewer handlers
@@ -568,11 +655,9 @@ ipcMain.handle('mcp:save-config', async (_, content: string) => {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(mcpConfigPath, content, 'utf-8');
 
-    // Update agent services
-    if (agent) {
-      // We might need to reload MCP client here, but for now just saving is enough.
-      // The user might need to restart app or we can add a reload capability later.
-    }
+    // TODO: Update agent MCP services if needed
+    // With multi-agent architecture, we might need to reload MCP for all active agents
+    // For now, user needs to restart the app or start new sessions
     return { success: true };
   } catch (e) {
     console.error('Failed to save MCP config:', e);
@@ -876,89 +961,8 @@ ipcMain.handle('plugin:marketplace-list', async () => {
   }
 });
 
-function initializeAgent() {
-  try {
-    const apiKey = configStore.getApiKey() || process.env.ANTHROPIC_API_KEY
-    const integrationMode = configStore.getIntegrationMode()
-    
-    console.log('[main] Initializing agent...')
-    console.log('[main] Integration mode:', integrationMode)
-
-    if (!mainWin) {
-      console.warn('[main] Main window not available for agent initialization')
-      return
-    }
-
-    // Inject CodeBuddy environment variables from stored config (UI values take priority)
-    // Default to 'ioa' for internal network environment
-    try {
-      const storedApiKey = configStore.getCodeBuddyApiKey()
-      const storedInternetEnv = configStore.getCodeBuddyInternetEnv() // defaults to 'ioa'
-      
-      if (storedApiKey && storedApiKey.trim() !== '') {
-        process.env.CODEBUDDY_API_KEY = storedApiKey
-        console.log('[main] Injected CODEBUDDY_API_KEY from stored config')
-      }
-      // Always set internet environment, default to 'ioa'
-      process.env.CODEBUDDY_INTERNET_ENVIRONMENT = storedInternetEnv || 'ioa'
-      console.log('[main] Injected CODEBUDDY_INTERNET_ENVIRONMENT:', process.env.CODEBUDDY_INTERNET_ENVIRONMENT)
-    } catch (envErr) {
-      console.error('[main] Failed to inject CodeBuddy env vars:', envErr)
-      // Fallback to default
-      process.env.CODEBUDDY_INTERNET_ENVIRONMENT = 'ioa'
-    }
-
-    if (integrationMode === 'sdk-codebuddy') {
-      // Initialize SDK-based CodeBuddy agent
-      const codeBuddyApiKey = configStore.getCodeBuddyApiKey()
-      const codeBuddyInternetEnv = configStore.getCodeBuddyInternetEnv()
-      
-      console.log('[main] Initializing CodeBuddy SDK Agent...')
-      console.log('[main] CodeBuddy API Key:', codeBuddyApiKey ? '***' + codeBuddyApiKey.slice(-8) : 'NOT SET')
-      console.log('[main] CodeBuddy Internet Env:', codeBuddyInternetEnv || 'NOT SET')
-
-      agent = new CodeBuddySDKRuntime(mainWin, codeBuddyApiKey, codeBuddyInternetEnv)
-      if (floatingBallWin) {
-        agent.addWindow(floatingBallWin)
-      }
-      (global as Record<string, unknown>).agent = agent
-      agent.initialize().catch(err => console.error('[main] CodeBuddy SDK initialization failed:', err))
-      console.log('[main] CodeBuddy SDK Agent initialized')
-
-  } else if (integrationMode === 'cli-codebuddy') {
-    // Initialize CLI-based CodeBuddy agent
-    console.log('[main] Initializing CodeBuddy CLI Agent...')
-    agent = new CLIAgentRuntime(mainWin)
-    if (floatingBallWin) {
-      agent.addWindow(floatingBallWin)
-    }
-    (global as Record<string, unknown>).agent = agent
-    agent.initialize().catch(err => console.error('[main] CodeBuddy CLI initialization failed:', err))
-    console.log('[main] CodeBuddy CLI Agent initialized')
-    
-  } else {
-    // Initialize API-based agent (default)
-    if (apiKey) {
-      console.log('[main] Initializing API Agent...')
-      console.log('[main] Model:', configStore.getModel())
-      console.log('[main] API URL:', configStore.getApiUrl())
-      
-      agent = new AgentRuntime(apiKey, mainWin, configStore.getModel(), configStore.getApiUrl())
-      if (floatingBallWin) {
-        agent.addWindow(floatingBallWin)
-      }
-      (global as Record<string, unknown>).agent = agent
-      agent.initialize().catch(err => console.error('[main] Agent initialization failed:', err))
-      console.log('[main] API Agent initialized')
-    } else {
-      console.warn('[main] No API Key found. Please configure in Settings.')
-    }
-  }
-  } catch (err) {
-    console.error('[main] Critical error during agent initialization:', err)
-    // Don't crash the app, just log the error
-  }
-}
+// NOTE: initializeAgent() is deprecated. Agents are now created on-demand by AgentManager.
+// Each session gets its own agent instance for true multi-session concurrency.
 
 function createTray() {
   try {
@@ -990,12 +994,13 @@ function createTray() {
 
   const contextMenu = Menu.buildFromTemplate([
     {
-      label: '显示主窗口',
+      label: '新建窗口',
+      accelerator: 'CommandOrControl+N',
       click: () => {
-        mainWin?.show()
-        mainWin?.focus()
+        createSessionWindow()
       }
     },
+    { type: 'separator' },
     {
       label: '显示悬浮球',
       click: () => {
@@ -1015,32 +1020,45 @@ function createTray() {
   tray.setContextMenu(contextMenu)
 
   tray.on('click', () => {
-    if (mainWin) {
-      if (mainWin.isVisible()) {
-        mainWin.hide()
+    // Show the most recent window or create a new one
+    const windows = BrowserWindow.getAllWindows().filter(w => w !== floatingBallWin)
+    if (windows.length > 0) {
+      const lastWindow = windows[0]
+      if (lastWindow.isVisible()) {
+        lastWindow.hide()
       } else {
-        mainWin.show()
-        mainWin.focus()
+        lastWindow.show()
+        lastWindow.focus()
       }
+    } else {
+      createSessionWindow()
     }
   })
 }
 
-function createMainWindow() {
+/**
+ * Create a new session window
+ * Each window = one session = one CodeBuddy process
+ */
+function createSessionWindow(sessionId?: string): BrowserWindow {
+  // Create or use provided sessionId
+  const session = sessionId 
+    ? sessionStore.getSession(sessionId) || sessionStore.createSession()
+    : sessionStore.createSession()
+  
+  const finalSessionId = session.id
+  
   // Platform-specific window options
   const isMac = process.platform === 'darwin'
   
-  mainWin = new BrowserWindow({
-    width: 480,
-    height: 720,
-    minWidth: 400,
+  const win = new BrowserWindow({
+    width: 520,
+    height: 760,
+    minWidth: 420,
     minHeight: 600,
     icon: getPublicAssetPath('logo.png'),
     frame: false,
-    // On macOS: use hiddenInset for native traffic lights
-    // On Windows/Linux: completely frameless, custom controls in renderer
     titleBarStyle: isMac ? 'hiddenInset' : 'default',
-    // Add extra space for traffic lights on macOS
     trafficLightPosition: isMac ? { x: 12, y: 12 } : undefined,
     webPreferences: {
       preload: path.join(__dirname, 'preload.mjs'),
@@ -1049,29 +1067,39 @@ function createMainWindow() {
   })
 
   // Remove menu bar
-  mainWin.setMenu(null)
+  win.setMenu(null)
 
-  mainWin.once('ready-to-show', () => {
-    console.log('Main window ready.')
-    mainWin?.show()
+  // Register window with AgentManager
+  agentManager.registerWindow(win.id, finalSessionId, win)
+  
+  // Set as current session
+  sessionStore.setCurrentSession(finalSessionId)
+
+  win.once('ready-to-show', () => {
+    console.log(`[Main] Session window ready: ${finalSessionId}`)
+    win.show()
   })
 
-  mainWin.on('close', (event) => {
-    if (!app.isQuitting) {
-      event.preventDefault()
-      mainWin?.hide()
+  // When window closes, cleanup the agent
+  win.on('closed', () => {
+    console.log(`[Main] Session window closed: ${finalSessionId}`)
+    agentManager.unregisterWindow(win.id)
+    
+    // If this was the main window, clear the reference
+    if (mainWin === win) {
+      mainWin = null
     }
   })
 
   // Handle render process crash - auto recover
-  mainWin.webContents.on('render-process-gone', (_event: unknown, details: { reason: string }) => {
+  win.webContents.on('render-process-gone', (_event: unknown, details: { reason: string }) => {
     console.error('[Main] Render process gone:', details.reason)
-    if (details.reason !== 'clean-exit' && mainWin && !mainWin.isDestroyed()) {
-      console.log('[Main] Attempting to reload main window...')
+    if (details.reason !== 'clean-exit' && !win.isDestroyed()) {
+      console.log('[Main] Attempting to reload window...')
       setTimeout(() => {
         try {
-          if (mainWin && !mainWin.isDestroyed()) {
-            mainWin.reload()
+          if (!win.isDestroyed()) {
+            win.reload()
           }
         } catch (err) {
           console.error('[Main] Failed to reload:', err)
@@ -1081,12 +1109,12 @@ function createMainWindow() {
   })
 
   // Handle crashes
-  mainWin.webContents.on('crashed' as any, () => {
-    console.error('[Main] Main window crashed, reloading...')
+  win.webContents.on('crashed' as any, () => {
+    console.error('[Main] Window crashed, reloading...')
     setTimeout(() => {
       try {
-        if (mainWin && !mainWin.isDestroyed()) {
-          mainWin.reload()
+        if (!win.isDestroyed()) {
+          win.reload()
         }
       } catch (err) {
         console.error('[Main] Failed to reload after crash:', err)
@@ -1094,15 +1122,19 @@ function createMainWindow() {
     }, 1000)
   })
 
-  mainWin.webContents.on('did-finish-load', () => {
-    mainWin?.webContents.send('main-process-message', (new Date).toLocaleString())
-  })
-
+  // Load the app with session ID in hash
   if (VITE_DEV_SERVER_URL) {
-    mainWin.loadURL(VITE_DEV_SERVER_URL)
+    win.loadURL(`${VITE_DEV_SERVER_URL}#session=${finalSessionId}`)
   } else {
-    mainWin.loadFile(path.join(RENDERER_DIST, 'index.html'))
+    win.loadFile(path.join(RENDERER_DIST, 'index.html'), { hash: `session=${finalSessionId}` })
   }
+
+  return win
+}
+
+function createMainWindow() {
+  // Create the first session window as the main window
+  mainWin = createSessionWindow()
 }
 
 function createFloatingBallWindow() {
@@ -1163,16 +1195,14 @@ function createFloatingBallWindow() {
   }
 
   floatingBallWin.on('closed', () => {
-    if (agent && floatingBallWin) {
-      agent.removeWindow(floatingBallWin)
-    }
+    agentManager.setFloatingBallWindow(null)
     floatingBallWin = null
   })
 
-  // Add to agent after creation
+  // Add to agent manager after creation
   floatingBallWin.webContents.on('did-finish-load', () => {
-    if (agent && floatingBallWin) {
-      agent.addWindow(floatingBallWin)
+    if (floatingBallWin) {
+      agentManager.setFloatingBallWindow(floatingBallWin)
     }
   })
 }
