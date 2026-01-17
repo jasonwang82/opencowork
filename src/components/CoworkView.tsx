@@ -45,7 +45,6 @@ export function CoworkView({ history, onSendMessage, onAbort, isProcessing, onOp
     const [streamingText, setStreamingText] = useState('');
     const [progressMessages, setProgressMessages] = useState<CLIProgress[]>([]);
     const [workingDir, setWorkingDir] = useState<string | null>(null);
-    const [modelName, setModelName] = useState('glm-4.7');
     const [permissionRequest, setPermissionRequest] = useState<PermissionRequest | null>(null);
     const [showHistory, setShowHistory] = useState(false);
     const [sessions, setSessions] = useState<SessionSummary[]>([]);
@@ -557,12 +556,6 @@ export function CoworkView({ history, onSendMessage, onAbort, isProcessing, onOp
                                 className="flex-1 bg-transparent text-stone-800 placeholder:text-stone-400 py-3 text-sm focus:outline-none"
                                 disabled={isProcessing}
                             />
-
-                            {/* Model Selector */}
-                            <div className="flex items-center gap-1.5 px-3 text-xs text-stone-500 border-l border-stone-100">
-                                <span className="font-medium max-w-20 truncate">{modelName}</span>
-                                <ChevronDown size={12} />
-                            </div>
 
                             <div className="pr-2">
                                 {isProcessing ? (
