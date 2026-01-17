@@ -150,6 +150,28 @@ app.on('child-process-gone', (_event: unknown, details: { type: string; reason: 
 })
 
 app.whenReady().then(() => {
+  // Export stored API keys to environment variables FIRST (before any other initialization)
+  try {
+    const storedCodeBuddyApiKey = configStore.getCodeBuddyApiKey()
+    const storedCodeBuddyInternetEnv = configStore.getCodeBuddyInternetEnv()
+    const storedAnthropicApiKey = configStore.getApiKey()
+    
+    if (storedCodeBuddyApiKey && storedCodeBuddyApiKey.trim() !== '') {
+      process.env.CODEBUDDY_API_KEY = storedCodeBuddyApiKey
+      console.log('[main] Exported CODEBUDDY_API_KEY from stored config on startup')
+    }
+    if (storedCodeBuddyInternetEnv) {
+      process.env.CODEBUDDY_INTERNET_ENVIRONMENT = storedCodeBuddyInternetEnv
+      console.log('[main] Exported CODEBUDDY_INTERNET_ENVIRONMENT:', storedCodeBuddyInternetEnv)
+    }
+    if (storedAnthropicApiKey && storedAnthropicApiKey.trim() !== '') {
+      process.env.ANTHROPIC_API_KEY = storedAnthropicApiKey
+      console.log('[main] Exported ANTHROPIC_API_KEY from stored config on startup')
+    }
+  } catch (err) {
+    console.error('[main] Failed to export stored API keys on startup:', err)
+  }
+
   // Log startup info for debugging
   addLog('App starting', {
     isPackaged: app.isPackaged,
@@ -663,6 +685,97 @@ ipcMain.handle('skills:delete', async (_, skillId: string) => {
   }
 });
 
+// Plugin Marketplace Handlers
+const executeCodeBuddyCommand = (args: string[]): Promise<{ success: boolean; output?: string; error?: string }> => {
+  return new Promise((resolve) => {
+    const home = process.env.HOME || '';
+    const nvmDir = `${home}/.nvm/versions/node`;
+    const standardPaths = '/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin';
+    const nvmPaths = fs.existsSync(nvmDir)
+      ? fs.readdirSync(nvmDir).filter((v: string) => v.startsWith('v')).map((v: string) => `${nvmDir}/${v}/bin`).join(':')
+      : '';
+    const npmPaths = `${home}/.npm-global/bin:${home}/node_modules/.bin:/usr/local/lib/node_modules/.bin`;
+    const pathEnv = `${nvmPaths}:${npmPaths}:${process.env.PATH || ''}:${standardPaths}`;
+
+    const codebuddyProcess = spawn('codebuddy', args, {
+      shell: true,
+      env: { ...process.env, PATH: pathEnv, HOME: home }
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    codebuddyProcess.stdout?.on('data', (data) => {
+      stdout += data.toString();
+    });
+
+    codebuddyProcess.stderr?.on('data', (data) => {
+      stderr += data.toString();
+    });
+
+    codebuddyProcess.on('close', (code) => {
+      if (code === 0) {
+        resolve({ success: true, output: stdout.trim() });
+      } else {
+        const errorMsg = stderr.trim() || stdout.trim() || `Command failed with exit code ${code}`;
+        logger.error('CodeBuddy plugin command failed', { args, code, stderr, stdout });
+        resolve({ success: false, error: errorMsg });
+      }
+    });
+
+    codebuddyProcess.on('error', (err) => {
+      logger.error('CodeBuddy plugin command error', { args, error: err.message });
+      resolve({ success: false, error: `Failed to execute command: ${err.message}` });
+    });
+  });
+};
+
+ipcMain.handle('plugin:marketplace-add', async (_, source: string) => {
+  console.log('[main] Adding plugin marketplace:', source);
+  logger.info('Adding plugin marketplace', { source });
+  
+  // Use plugin subcommand (not slash command)
+  const result = await executeCodeBuddyCommand(['plugin', 'marketplace', 'add', source]);
+  
+  if (result.success) {
+    logger.info('Plugin marketplace added successfully', { source, output: result.output });
+  } else {
+    logger.error('Failed to add plugin marketplace', { source, error: result.error });
+  }
+  
+  return result;
+});
+
+ipcMain.handle('plugin:marketplace-remove', async (_, source: string) => {
+  console.log('[main] Removing plugin marketplace:', source);
+  logger.info('Removing plugin marketplace', { source });
+  
+  // Use plugin subcommand (not slash command)
+  const result = await executeCodeBuddyCommand(['plugin', 'marketplace', 'remove', source]);
+  
+  if (result.success) {
+    logger.info('Plugin marketplace removed successfully', { source, output: result.output });
+  } else {
+    logger.error('Failed to remove plugin marketplace', { source, error: result.error });
+  }
+  
+  return result;
+});
+
+ipcMain.handle('plugin:marketplace-list', async () => {
+  console.log('[main] Listing plugin marketplaces');
+  
+  // Use plugin subcommand (not slash command)
+  const result = await executeCodeBuddyCommand(['plugin', 'marketplace', 'list']);
+  
+  if (result.success) {
+    // Parse the output to extract marketplace names
+    // The output format may vary, so we return raw output for now
+    return { success: true, marketplaces: result.output };
+  } else {
+    return { success: false, error: result.error };
+  }
+});
 
 function initializeAgent() {
   try {

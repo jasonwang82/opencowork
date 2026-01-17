@@ -99,6 +99,49 @@ export class CLIAgentRuntime {
      * Find a compatible Node.js version from nvm or system
      * Returns the bin path to prepend to PATH, or error message if none found
      */
+    /**
+     * Check if CodeBuddy CLI supports --permission-mode option
+     * Returns the supported permission option or null
+     */
+    private detectPermissionOption(): string[] | null {
+        try {
+            const home = process.env.HOME || '';
+            const nvmDir = `${home}/.nvm/versions/node`;
+            const standardPaths = '/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin';
+            const nvmPaths = fs.existsSync(nvmDir) 
+                ? fs.readdirSync(nvmDir).filter(v => v.startsWith('v')).map(v => `${nvmDir}/${v}/bin`).join(':')
+                : '';
+            const npmPaths = `${home}/.npm-global/bin:${home}/node_modules/.bin:/usr/local/lib/node_modules/.bin`;
+            const pathEnv = `${nvmPaths}:${npmPaths}:${process.env.PATH || ''}:${standardPaths}`;
+            
+            const helpOutput = execSync('codebuddy --help 2>&1', {
+                encoding: 'utf-8',
+                env: { ...process.env, PATH: pathEnv, HOME: home },
+                shell: '/bin/bash',
+                timeout: 5000
+            });
+            
+            // Check for --permission-mode support (newer CLI versions)
+            if (helpOutput.includes('--permission-mode')) {
+                console.log('[CLIAgentRuntime] CLI supports --permission-mode');
+                return ['--permission-mode', 'bypassPermissions'];
+            }
+            
+            // Check for -y/--dangerously-skip-permissions support (older CLI versions)
+            if (helpOutput.includes('--dangerously-skip-permissions') || helpOutput.includes('-y,')) {
+                console.log('[CLIAgentRuntime] CLI supports --dangerously-skip-permissions');
+                return ['--dangerously-skip-permissions'];
+            }
+            
+            console.log('[CLIAgentRuntime] CLI does not support permission bypass options');
+            return null;
+        } catch (e) {
+            console.warn('[CLIAgentRuntime] Failed to detect permission options:', e);
+            // Default to trying --permission-mode, will fail gracefully if not supported
+            return null;
+        }
+    }
+
     private findCompatibleNodePath(): { path: string | null; error: string | null } {
         try {
             const home = process.env.HOME || '';
@@ -294,7 +337,7 @@ export class CLIAgentRuntime {
         const workingDir = authorizedFolders[0];
 
         // Build codebuddy command with arguments
-        // CodeBuddy CLI usage: codebuddy -p --output-format stream-json --permission-mode bypassPermissions [--model MODEL] [prompt]
+        // CodeBuddy CLI usage: codebuddy -p --output-format stream-json [permission options] [--model MODEL] [prompt]
         const args: string[] = [];
         
         // Use print mode for non-interactive output
@@ -303,8 +346,14 @@ export class CLIAgentRuntime {
         // Use stream-json format to get structured output with tool calls
         args.push('--output-format', 'stream-json');
         
-        // Use permission mode to bypass permissions for automated use
-        args.push('--permission-mode', 'bypassPermissions');
+        // Detect and use appropriate permission bypass option for the installed CLI version
+        const permissionOption = this.detectPermissionOption();
+        if (permissionOption) {
+            args.push(...permissionOption);
+            console.log('[CLIAgentRuntime] Using permission option:', permissionOption.join(' '));
+        } else {
+            console.log('[CLIAgentRuntime] No permission bypass option available, running without it');
+        }
 
         // Add model if specified (format: claude-opus-4.5, claude-sonnet-4-20250514, etc.)
         const model = configStore.getModel();
@@ -405,11 +454,18 @@ export class CLIAgentRuntime {
             let jsonBuffer = '';
             let stderrBuffer = '';
             let finalResult = '';
+            let streamedContent = '';  // Accumulate all streamed text content
+            let hasError = false;
+            let errorMessage = '';
 
             this.currentProcess.stdout?.on('data', (data) => {
                 try {
                     const text = data.toString();
                     jsonBuffer += text;
+                    
+                    // Log raw output for debugging
+                    console.log('[CLIAgentRuntime] Raw stdout chunk:', text.substring(0, 500));
+                    logger.info('CLI raw stdout', { chunk: text.substring(0, 200), length: text.length });
                     
                     // Parse JSON messages line by line
                     const lines = jsonBuffer.split('\n');
@@ -421,19 +477,52 @@ export class CLIAgentRuntime {
                         
                         try {
                             const msg = JSON.parse(trimmedLine) as CLIStreamMessage;
+                            
+                            // Log every parsed message
+                            console.log('[CLIAgentRuntime] Parsed message:', JSON.stringify(msg, null, 2).substring(0, 500));
+                            logger.info('CLI parsed message', { 
+                                type: msg.type, 
+                                subtype: msg.subtype,
+                                is_error: msg.is_error,
+                                hasResult: !!msg.result,
+                                hasMessage: !!msg.message
+                            });
+                            
+                            // Accumulate text content from assistant messages
+                            if (msg.type === 'assistant' && msg.message?.content) {
+                                for (const block of msg.message.content) {
+                                    if (block.type === 'text' && block.text) {
+                                        streamedContent += block.text;
+                                    }
+                                }
+                            }
+                            
                             this.handleStreamMessage(msg);
                             
-                            // Capture final result text
-                            if (msg.type === 'result' && msg.result) {
-                                finalResult = msg.result;
+                            // Capture final result or error
+                            if (msg.type === 'result') {
+                                if (msg.is_error) {
+                                    hasError = true;
+                                    errorMessage = msg.error_message || msg.error || msg.result || 'Unknown error';
+                                    console.error('[CLIAgentRuntime] Error in result:', errorMessage);
+                                    logger.error('CLI result error', { 
+                                        error: errorMessage,
+                                        fullMessage: JSON.stringify(msg)
+                                    });
+                                } else if (msg.result) {
+                                    finalResult = msg.result;
+                                    console.log('[CLIAgentRuntime] Final result captured:', finalResult.substring(0, 200));
+                                }
                             }
                         } catch (e) {
                             // Not valid JSON, might be partial or status indicator
                             console.log('[CLIAgentRuntime] Non-JSON output:', trimmedLine);
+                            logger.warn('CLI non-JSON output', { line: trimmedLine.substring(0, 100) });
                         }
                     }
                 } catch (err) {
                     console.error('[CLIAgentRuntime] Error processing stdout:', err);
+                    logger.error('Error processing stdout', { error: String(err) });
                 }
             });
 
@@ -458,55 +547,101 @@ export class CLIAgentRuntime {
 
             this.currentProcess.on('close', (code) => {
                 try {
+                    console.log('[CLIAgentRuntime] Process closed with code:', code);
+                    console.log('[CLIAgentRuntime] hasError:', hasError);
+                    console.log('[CLIAgentRuntime] errorMessage:', errorMessage);
+                    console.log('[CLIAgentRuntime] finalResult length:', finalResult.length);
+                    console.log('[CLIAgentRuntime] streamedContent length:', streamedContent.length);
+                    console.log('[CLIAgentRuntime] stderrBuffer:', stderrBuffer);
+                    
+                    logger.info('CLI process closed', {
+                        code,
+                        hasError,
+                        errorMessageLength: errorMessage.length,
+                        finalResultLength: finalResult.length,
+                        streamedContentLength: streamedContent.length,
+                        stderrBufferLength: stderrBuffer.length
+                    });
+                    
                     // Process any remaining buffer
                     if (jsonBuffer.trim() && jsonBuffer.trim().startsWith('{')) {
                         try {
                             const msg = JSON.parse(jsonBuffer.trim()) as CLIStreamMessage;
+                            console.log('[CLIAgentRuntime] Processing remaining buffer:', JSON.stringify(msg).substring(0, 200));
                             this.handleStreamMessage(msg);
-                            if (msg.type === 'result' && msg.result) {
-                                finalResult = msg.result;
+                            if (msg.type === 'result') {
+                                if (msg.is_error) {
+                                    hasError = true;
+                                    errorMessage = msg.error_message || msg.error || msg.result || 'Unknown error';
+                                } else if (msg.result) {
+                                    finalResult = msg.result;
+                                }
                             }
                         } catch (e) {
-                            // Ignore parse errors for incomplete data
+                            console.log('[CLIAgentRuntime] Could not parse remaining buffer');
                         }
                     }
 
-                    if (code === 0) {
-                        // Success - update final assistant response in history
-                        assistantMessage.content = finalResult || 'Command executed successfully.';
-                        this.notifyUpdate();
+                    // Determine final content to show
+                    let finalContent = '';
+                    
+                    if (hasError) {
+                        // Show error message
+                        finalContent = `❌ 执行错误: ${errorMessage}`;
+                        console.error('[CLIAgentRuntime] Showing error:', finalContent);
+                        logger.error('CLI execution failed', { error: errorMessage });
+                    } else if (streamedContent.trim()) {
+                        // Use accumulated streamed content (preferred - real-time content)
+                        finalContent = streamedContent;
+                        console.log('[CLIAgentRuntime] Using streamed content');
+                    } else if (finalResult.trim()) {
+                        // Use final result from result message
+                        finalContent = finalResult;
+                        console.log('[CLIAgentRuntime] Using final result');
+                    } else if (stderrBuffer.trim()) {
+                        // Show stderr as error
+                        finalContent = `⚠️ ${stderrBuffer}`;
+                        console.log('[CLIAgentRuntime] Using stderr as content');
+                    } else {
+                        // Fallback
+                        finalContent = code === 0 
+                            ? '命令执行完成，但没有返回内容。'
+                            : `命令执行失败，退出码: ${code}`;
+                        console.log('[CLIAgentRuntime] Using fallback content');
+                    }
+
+                    // Check for Node.js version error
+                    if (stderrBuffer.includes('requires Node.js') || stderrBuffer.includes('Node.js v')) {
+                        const versionMatch = stderrBuffer.match(/Node\.js v([\d.]+)/);
+                        const requiredVersion = versionMatch ? versionMatch[1] : 'v18.20.8';
+                        finalContent = `Node.js 版本过低。\n\n` +
+                            `CodeBuddy 需要 Node.js ${requiredVersion} 或更新版本。\n` +
+                            `当前版本: ${process.version}\n\n` +
+                            `请升级 Node.js:\n` +
+                            `https://nodejs.org/en/download/\n\n` +
+                            `或者使用 nvm 升级:\n` +
+                            `nvm install 18.20.8\n` +
+                            `nvm use 18.20.8`;
+                        logger.error('Node.js version incompatible', { 
+                            currentVersion: process.version,
+                            requiredVersion,
+                            stderr: stderrBuffer
+                        });
+                    }
+
+                    // Update assistant message
+                    assistantMessage.content = finalContent;
+                    this.notifyUpdate();
+                    
+                    if (code === 0 && !hasError) {
                         resolve();
                     } else {
-                        // Error - update assistant message with error instead of removing
-                        let errorMessage = stderrBuffer || `CodeBuddy process exited with code ${code}`;
-                        
-                        // Check for Node.js version error and provide friendly message
-                        if (errorMessage.includes('requires Node.js') || errorMessage.includes('Node.js v')) {
-                            const versionMatch = errorMessage.match(/Node\.js v([\d.]+)/);
-                            const requiredVersion = versionMatch ? versionMatch[1] : 'v18.20.8';
-                            errorMessage = `Node.js 版本过低。\n\n` +
-                                `CodeBuddy 需要 Node.js ${requiredVersion} 或更新版本。\n` +
-                                `当前版本: ${process.version}\n\n` +
-                                `请升级 Node.js:\n` +
-                                `https://nodejs.org/en/download/\n\n` +
-                                `或者使用 nvm 升级:\n` +
-                                `nvm install 18.20.8\n` +
-                                `nvm use 18.20.8`;
-                            logger.error('Node.js version incompatible', { 
-                                currentVersion: process.version,
-                                requiredVersion,
-                                stderr: stderrBuffer
-                            });
-                        }
-                        
-                        // Update assistant message with error instead of removing
-                        assistantMessage.content = errorMessage;
-                        this.broadcast('agent:error', errorMessage);
-                        this.notifyUpdate();
-                        reject(new Error(errorMessage));
+                        this.broadcast('agent:error', finalContent);
+                        reject(new Error(finalContent));
                     }
                 } catch (err) {
                     console.error('[CLIAgentRuntime] Error in close handler:', err);
+                    logger.error('Error in close handler', { error: String(err) });
                     reject(err);
                 } finally {
                     this.currentProcess = null;
@@ -531,15 +666,57 @@ export class CLIAgentRuntime {
      */
     private handleStreamMessage(msg: CLIStreamMessage) {
         try {
-            console.log('[CLIAgentRuntime] Stream message:', msg.type, msg.subtype || '');
+            // Detailed logging for all message types
+            console.log('[CLIAgentRuntime] === Stream Message ===');
+            console.log('[CLIAgentRuntime] Type:', msg.type);
+            console.log('[CLIAgentRuntime] Subtype:', msg.subtype || 'N/A');
+            console.log('[CLIAgentRuntime] Is Error:', msg.is_error);
+            console.log('[CLIAgentRuntime] UUID:', msg.uuid || 'N/A');
+            
+            // Log message content details
+            if (msg.message?.content) {
+                console.log('[CLIAgentRuntime] Content blocks:', msg.message.content.length);
+                for (let i = 0; i < msg.message.content.length; i++) {
+                    const block = msg.message.content[i];
+                    console.log(`[CLIAgentRuntime] Block[${i}] type:`, block.type);
+                    if (block.type === 'text') {
+                        console.log(`[CLIAgentRuntime] Block[${i}] text:`, (block.text || '').substring(0, 200));
+                    } else if (block.type === 'tool_use') {
+                        console.log(`[CLIAgentRuntime] Block[${i}] tool:`, block.name);
+                        console.log(`[CLIAgentRuntime] Block[${i}] input:`, JSON.stringify(block.input || {}).substring(0, 200));
+                    }
+                }
+            }
+            
+            // Log result details
+            if (msg.result) {
+                console.log('[CLIAgentRuntime] Result:', msg.result.substring(0, 300));
+            }
+            if (msg.error_message) {
+                console.log('[CLIAgentRuntime] Error Message:', msg.error_message);
+            }
+            if (msg.error) {
+                console.log('[CLIAgentRuntime] Error:', msg.error);
+            }
+            
+            // Log to app logger for UI visibility
+            logger.info('CLI stream message', { 
+                type: msg.type, 
+                subtype: msg.subtype,
+                is_error: msg.is_error,
+                contentBlocks: msg.message?.content?.length || 0,
+                resultLength: msg.result?.length || 0
+            });
             
             // Print full message details for debugging errors
             if (msg.type === 'result' && (msg.subtype === 'error_during_execution' || msg.is_error)) {
-                console.error('[CLIAgentRuntime] Error details:', JSON.stringify(msg, null, 2));
+                console.error('[CLIAgentRuntime] !!! ERROR DETECTED !!!');
+                console.error('[CLIAgentRuntime] Full error message:', JSON.stringify(msg, null, 2));
                 logger.error('CLI execution error', { 
                     subtype: msg.subtype, 
                     error: msg.error_message || msg.result,
-                    is_error: msg.is_error
+                    is_error: msg.is_error,
+                    fullMessage: JSON.stringify(msg)
                 });
             }
             

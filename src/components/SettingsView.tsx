@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { X, Settings, FolderOpen, Server, Check, Plus, Trash2, Edit2, Zap, Eye, FileText, Download, RefreshCw } from 'lucide-react';
+import { X, Settings, FolderOpen, Server, Check, Plus, Trash2, Edit2, Zap, Eye, FileText, Download, RefreshCw, Package, Loader2 } from 'lucide-react';
 import { SkillEditor } from './SkillEditor';
 import { useI18n } from '../i18n/useI18n';
 import type { IntegrationMode } from '../../electron/config/ConfigStore';
@@ -47,8 +47,21 @@ export function SettingsView({ onClose }: SettingsViewProps) {
         codeBuddyInternetEnv: 'ioa'
     });
     const [saved, setSaved] = useState(false);
-    const [activeTab, setActiveTab] = useState<'api' | 'folders' | 'mcp' | 'skills' | 'advanced' | 'logs'>('api');
+    const [activeTab, setActiveTab] = useState<'api' | 'folders' | 'mcp' | 'skills' | 'plugins' | 'advanced' | 'logs'>('api');
     const [isRecordingShortcut, setIsRecordingShortcut] = useState(false);
+
+    // Plugins State
+    const [pluginSource, setPluginSource] = useState('');
+    const [pluginLoading, setPluginLoading] = useState(false);
+    const [pluginStatus, setPluginStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+    const [installedMarketplaces, setInstalledMarketplaces] = useState<string>('');
+    const [builtinLoading, setBuiltinLoading] = useState<Record<string, boolean>>({});
+
+    const BUILTIN_MARKETPLACES = [
+        { id: 'anthropics/claude-code', name: 'Claude Code', description: 'Official Claude Code plugins' },
+        { id: 'anthropics/skills', name: 'Skills', description: 'Official AI skills library' },
+        { id: 'anthropics/claude-plugins-official', name: 'Claude Plugins', description: 'Official Claude plugins collection' },
+    ];
 
     // Logs State
     interface LogEntry {
@@ -154,18 +167,31 @@ export function SettingsView({ onClose }: SettingsViewProps) {
         });
     }, []);
 
+    const loadPluginMarketplaces = useCallback(async () => {
+        try {
+            const result = await window.ipcRenderer.invoke('plugin:marketplace-list') as { success: boolean; marketplaces?: string; error?: string };
+            if (result.success && result.marketplaces) {
+                setInstalledMarketplaces(result.marketplaces);
+            }
+        } catch (e) {
+            console.error('Failed to load plugin marketplaces:', e);
+        }
+    }, []);
+
     useEffect(() => {
         if (activeTab === 'mcp') {
             window.ipcRenderer.invoke('mcp:get-config').then(cfg => setMcpConfig(cfg as string));
         } else if (activeTab === 'skills') {
             refreshSkills();
+        } else if (activeTab === 'plugins') {
+            loadPluginMarketplaces();
         } else if (activeTab === 'advanced') {
             loadPermissions();
             loadBlacklist();
         } else if (activeTab === 'logs') {
             loadLogs();
         }
-    }, [activeTab, loadLogs]);
+    }, [activeTab, loadLogs, loadPluginMarketplaces]);
 
     // Shortcut recording handler
     const handleShortcutKeyDown = (e: React.KeyboardEvent) => {
@@ -229,6 +255,53 @@ export function SettingsView({ onClose }: SettingsViewProps) {
         }
     };
 
+    const handleAddMarketplace = async () => {
+        const source = pluginSource.trim();
+        if (!source) return;
+
+        setPluginLoading(true);
+        setPluginStatus(null);
+
+        try {
+            const result = await window.ipcRenderer.invoke('plugin:marketplace-add', source) as { success: boolean; output?: string; error?: string };
+            if (result.success) {
+                setPluginStatus({ type: 'success', message: `插件市场添加成功！${result.output || ''}` });
+                setPluginSource('');
+                loadPluginMarketplaces();
+            } else {
+                setPluginStatus({ type: 'error', message: `添加失败: ${result.error || '请检查输入格式'}` });
+            }
+        } catch (e) {
+            setPluginStatus({ type: 'error', message: `添加失败: ${(e as Error).message}` });
+        } finally {
+            setPluginLoading(false);
+        }
+    };
+
+    const handleBuiltinMarketplace = async (marketId: string, isInstalled: boolean) => {
+        setBuiltinLoading(prev => ({ ...prev, [marketId]: true }));
+        setPluginStatus(null);
+
+        try {
+            const action = isInstalled ? 'plugin:marketplace-remove' : 'plugin:marketplace-add';
+            const result = await window.ipcRenderer.invoke(action, marketId) as { success: boolean; output?: string; error?: string };
+            
+            if (result.success) {
+                setPluginStatus({ 
+                    type: 'success', 
+                    message: isInstalled ? `已移除 ${marketId}` : `已安装 ${marketId}` 
+                });
+                loadPluginMarketplaces();
+            } else {
+                setPluginStatus({ type: 'error', message: `操作失败: ${result.error || '未知错误'}` });
+            }
+        } catch (e) {
+            setPluginStatus({ type: 'error', message: `操作失败: ${(e as Error).message}` });
+        } finally {
+            setBuiltinLoading(prev => ({ ...prev, [marketId]: false }));
+        }
+    };
+
     const addFolder = async () => {
         const result = await window.ipcRenderer.invoke('dialog:select-folder') as string | null;
         if (result && !config.authorizedFolders.includes(result)) {
@@ -276,6 +349,7 @@ export function SettingsView({ onClose }: SettingsViewProps) {
                         { id: 'folders' as const, label: '权限', icon: <FolderOpen size={14} /> },
                         { id: 'mcp' as const, label: 'MCP', icon: <Server size={14} /> },
                         { id: 'skills' as const, label: 'Skills', icon: <Zap size={14} /> },
+                        { id: 'plugins' as const, label: '插件', icon: <Package size={14} /> },
                         { id: 'advanced' as const, label: '高级', icon: <Settings size={14} /> },
                         { id: 'logs' as const, label: '日志', icon: <FileText size={14} /> },
                     ].map(tab => (
@@ -593,6 +667,128 @@ export function SettingsView({ onClose }: SettingsViewProps) {
                                                 </div>
                                             </div>
                                         ))}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {activeTab === 'plugins' && (
+                            <div className="space-y-5">
+                                {/* Add Marketplace Section */}
+                                <div className="space-y-3">
+                                    <div>
+                                        <h3 className="text-sm font-medium text-stone-700">添加插件市场</h3>
+                                        <p className="text-xs text-stone-400 mt-1">支持以下格式:</p>
+                                        <ul className="text-xs text-stone-400 mt-1 space-y-0.5 font-mono">
+                                            <li>• owner/repo (GitHub)</li>
+                                            <li>• git@github.com:owner/repo.git (SSH)</li>
+                                            <li>• https://example.com/marketplace.json</li>
+                                            <li>• ./path/to/marketplace</li>
+                                        </ul>
+                                    </div>
+                                    <div className="flex gap-2">
+                                        <input
+                                            type="text"
+                                            value={pluginSource}
+                                            onChange={(e) => setPluginSource(e.target.value)}
+                                            onKeyDown={(e) => {
+                                                if (e.key === 'Enter' && pluginSource.trim()) {
+                                                    handleAddMarketplace();
+                                                }
+                                            }}
+                                            placeholder="owner/repo 或 URL"
+                                            className="flex-1 px-3 py-2 text-sm border border-stone-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 font-mono"
+                                            disabled={pluginLoading}
+                                        />
+                                        <button
+                                            onClick={handleAddMarketplace}
+                                            disabled={!pluginSource.trim() || pluginLoading}
+                                            className="px-4 py-2 text-sm font-medium text-white bg-brand-500 rounded-lg hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                                        >
+                                            {pluginLoading ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+                                            添加
+                                        </button>
+                                    </div>
+                                    {pluginStatus && (
+                                        <div className={`p-3 rounded-lg text-sm ${
+                                            pluginStatus.type === 'success' 
+                                                ? 'bg-green-50 text-green-700 border border-green-200' 
+                                                : 'bg-red-50 text-red-700 border border-red-200'
+                                        }`}>
+                                            {pluginStatus.message}
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Built-in Marketplaces */}
+                                <div className="space-y-3">
+                                    <div className="flex items-center justify-between">
+                                        <h3 className="text-sm font-medium text-stone-700">推荐插件市场</h3>
+                                        <button
+                                            onClick={loadPluginMarketplaces}
+                                            className="text-xs text-brand-500 hover:text-brand-600 flex items-center gap-1"
+                                        >
+                                            <RefreshCw size={12} />
+                                            刷新
+                                        </button>
+                                    </div>
+                                    <div className="grid grid-cols-1 gap-2">
+                                        {BUILTIN_MARKETPLACES.map((market) => {
+                                            const isInstalled = installedMarketplaces.includes(market.id);
+                                            const isLoading = builtinLoading[market.id];
+                                            return (
+                                                <div
+                                                    key={market.id}
+                                                    className="flex items-center justify-between p-3 bg-white border border-stone-200 rounded-lg hover:border-brand-200 transition-colors"
+                                                >
+                                                    <div className="flex items-center gap-3">
+                                                        <div className="w-10 h-10 rounded-lg bg-brand-50 flex items-center justify-center">
+                                                            <Package size={20} className="text-brand-600" />
+                                                        </div>
+                                                        <div>
+                                                            <p className="text-sm font-medium text-stone-700">{market.name}</p>
+                                                            <p className="text-xs text-stone-400">{market.description}</p>
+                                                            <p className="text-[10px] text-stone-400 font-mono mt-0.5">{market.id}</p>
+                                                        </div>
+                                                    </div>
+                                                    <button
+                                                        onClick={() => handleBuiltinMarketplace(market.id, isInstalled)}
+                                                        disabled={isLoading}
+                                                        className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors flex items-center gap-1.5 ${
+                                                            isLoading
+                                                                ? 'bg-stone-100 text-stone-400 cursor-not-allowed'
+                                                                : isInstalled
+                                                                ? 'bg-red-50 text-red-600 hover:bg-red-100'
+                                                                : 'bg-brand-500 text-white hover:bg-brand-600'
+                                                        }`}
+                                                    >
+                                                        {isLoading ? (
+                                                            <Loader2 size={12} className="animate-spin" />
+                                                        ) : isInstalled ? (
+                                                            <>
+                                                                <Trash2 size={12} />
+                                                                移除
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <Download size={12} />
+                                                                安装
+                                                            </>
+                                                        )}
+                                                    </button>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+
+                                {/* Installed Marketplaces Info */}
+                                {installedMarketplaces && (
+                                    <div className="space-y-2">
+                                        <h3 className="text-sm font-medium text-stone-700">已安装的市场</h3>
+                                        <div className="bg-stone-900 rounded-lg p-3 font-mono text-xs text-stone-300 whitespace-pre-wrap max-h-32 overflow-y-auto">
+                                            {installedMarketplaces || '暂无已安装的插件市场'}
+                                        </div>
                                     </div>
                                 )}
                             </div>
