@@ -1,7 +1,7 @@
 // @see - https://www.electron.build/configuration/configuration
 {
   "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
-  "appId": "com.opencowork.app",
+  "appId": "com.workbuddy.app",
   "asar": true,
   "productName": "WorkBuddy",
   "icon": "logo.png",
@@ -12,7 +12,7 @@
   "publish": {
     "provider": "github",
     "owner": "Safphere",
-    "repo": "opencowork",
+    "repo": "workbuddy",
     "releaseType": "release"
   },
   "files": [
@@ -24,7 +24,8 @@
       "dmg"
     ],
     "icon": "logo.png",
-    "artifactName": "${productName}-Mac-${version}-Installer.${ext}"
+    "artifactName": "${productName}-Mac-${version}-Installer.${ext}",
+    "identity": null
   },
   "win": {
     "target": [

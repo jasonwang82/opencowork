@@ -16,6 +16,20 @@ interface Message {
     content: string | ContentBlock[];
 }
 
+interface Artifact {
+    filePath: string;
+    fileName: string;
+}
+
+interface CLIProgress {
+    type: 'init' | 'tool_use' | 'tool_result' | 'complete';
+    message: string;
+    tool?: string;
+    filePath?: string;
+    isArtifact?: boolean;
+    is_error?: boolean;
+}
+
 export function FloatingBallPage() {
     const [ballState, setBallState] = useState<BallState>('collapsed');
     const [input, setInput] = useState('');
@@ -30,6 +44,8 @@ export function FloatingBallPage() {
     const collapseTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const [selectedImage, setSelectedImage] = useState<string | null>(null);
+    const [hasNotification, setHasNotification] = useState(false);
+    const [artifacts, setArtifacts] = useState<Artifact[]>([]);
 
     // Add transparent class to html element
     useEffect(() => {
@@ -58,10 +74,37 @@ export function FloatingBallPage() {
             setStreamingText('');
         });
 
+        // Listen for progress events to track artifacts and completion
+        const removeProgressListener = window.ipcRenderer.on('agent:cli-progress', (_event, ...args) => {
+            const progress = args[0] as CLIProgress;
+            
+            // Track artifacts
+            if (progress.isArtifact && progress.filePath) {
+                const fileName = progress.filePath.split('/').pop() || progress.filePath;
+                setArtifacts(prev => {
+                    // Avoid duplicates
+                    if (prev.some(a => a.filePath === progress.filePath)) return prev;
+                    return [...prev, { filePath: progress.filePath!, fileName }];
+                });
+            }
+            
+            // Show notification when task completes (in collapsed state)
+            if (progress.type === 'complete' && !progress.is_error) {
+                setHasNotification(true);
+            }
+        });
+
+        // Clear artifacts when new stream starts
+        const removeStreamStartListener = window.ipcRenderer.on('agent:stream-start', () => {
+            setArtifacts([]);
+        });
+
         return () => {
             removeHistoryListener?.();
             removeStreamListener?.();
             removeErrorListener?.();
+            removeProgressListener?.();
+            removeStreamStartListener?.();
         };
     }, []);
 
@@ -121,6 +164,7 @@ export function FloatingBallPage() {
     // Handle ball click - expand slowly
     const handleBallClick = () => {
         setBallState('input');
+        setHasNotification(false); // Clear notification when clicked
         window.ipcRenderer.invoke('floating-ball:toggle');
     };
 
@@ -291,6 +335,11 @@ export function FloatingBallPage() {
                     </div>
                     {isProcessing && (
                         <div className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-brand-500 rounded-full animate-pulse border-2 border-white" />
+                    )}
+                    {!isProcessing && hasNotification && (
+                        <div className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-green-500 rounded-full border-2 border-white flex items-center justify-center">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                        </div>
                     )}
                 </div>
             </div>
@@ -571,6 +620,26 @@ export function FloatingBallPage() {
                     <div className="flex items-center gap-2 text-xs text-stone-400">
                         <div className="w-1.5 h-1.5 bg-brand-500 rounded-full animate-bounce" />
                         思考中...
+                    </div>
+                )}
+
+                {/* Artifacts section */}
+                {!isProcessing && artifacts.length > 0 && (
+                    <div className="bg-stone-50 rounded-lg p-2 mt-2">
+                        <p className="text-xs text-stone-500 mb-1.5">产物</p>
+                        <div className="flex flex-wrap gap-1.5">
+                            {artifacts.map((artifact, idx) => (
+                                <button
+                                    key={idx}
+                                    onClick={() => window.ipcRenderer.invoke('shell:open-path', artifact.filePath)}
+                                    className="flex items-center gap-1 px-2 py-1 bg-white border border-stone-200 hover:bg-stone-100 rounded text-xs text-stone-600 transition-colors"
+                                    title={artifact.filePath}
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
+                                    <span className="truncate max-w-[100px]">{artifact.fileName}</span>
+                                </button>
+                            ))}
+                        </div>
                     </div>
                 )}
             </div>

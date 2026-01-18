@@ -42,6 +42,17 @@ export class PermissionManager {
         return Array.from(this.authorizedFolders);
     }
 
+    /**
+     * Sync authorized folders from configStore
+     * Call this after configStore.set('authorizedFolders', ...) to update cache
+     */
+    syncFromConfig(): void {
+        this.authorizedFolders.clear();
+        const savedFolders = configStore.getAuthorizedFolders();
+        savedFolders.forEach((f: string) => this.authorizedFolders.add(path.resolve(f)));
+        console.log('[PermissionManager] Synced folders from config:', Array.from(this.authorizedFolders));
+    }
+
     setNetworkAccess(enabled: boolean): void {
         this.networkAccess = enabled;
     }

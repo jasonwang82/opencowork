@@ -1,10 +1,10 @@
 # 配置指南
 
-OpenCowork 提供了灵活的配置选项，允许您自定义 API 连接、模型选择以及其他高级设置。
+WorkBuddy 提供了灵活的配置选项，允许您自定义 API 连接、模型选择以及其他高级设置。
 
 ## 默认配置
 
-OpenCowork 开箱即用，默认配置如下：
+WorkBuddy 开箱即用，默认配置如下：
 
 -   **接入方式 (Integration Mode)**: `API 模式`
 -   **API 地址 (API URL)**: `https://api.minimaxi.com/anthropic`
@@ -14,7 +14,7 @@ OpenCowork 开箱即用，默认配置如下：
 
 ## 接入方式
 
-OpenCowork 支持两种接入方式：
+WorkBuddy 支持两种接入方式：
 
 ### 1. API 模式（默认）
 

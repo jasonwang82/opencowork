@@ -3,6 +3,8 @@ import { AgentRuntime } from './AgentRuntime';
 import { CLIAgentRuntime } from './CLIAgentRuntime';
 import { CodeBuddySDKRuntime } from './CodeBuddySDKRuntime';
 import { configStore } from '../config/ConfigStore';
+import { permissionManager } from './security/PermissionManager';
+import { logger } from '../utils/logger';
 
 export type AgentType = AgentRuntime | CLIAgentRuntime | CodeBuddySDKRuntime;
 
@@ -28,7 +30,12 @@ export class AgentManager {
     public registerWindow(windowId: number, sessionId: string, win: BrowserWindow) {
         this.windowSessions.set(windowId, sessionId);
         this.sessionWindows.set(sessionId, win);
-        console.log(`[AgentManager] Registered window ${windowId} for session ${sessionId}`);
+        logger.info('Registered window with session', { 
+            windowId, 
+            sessionId,
+            totalWindowSessions: this.windowSessions.size,
+            totalSessionWindows: this.sessionWindows.size
+        });
     }
 
     /**
@@ -41,9 +48,34 @@ export class AgentManager {
             this.sessionWindows.delete(sessionId);
             // Also destroy the agent for this session
             this.destroyAgent(sessionId);
-            console.log(`[AgentManager] Unregistered window ${windowId}, session ${sessionId}`);
+            logger.info('Unregistered window', { windowId, sessionId });
+        } else {
+            logger.warn('Attempted to unregister unknown window', { windowId });
         }
         return sessionId;
+    }
+
+    /**
+     * Update session mapping for a window (used when switching workspaces)
+     * This keeps the window but associates it with a new session
+     */
+    public updateWindowSession(windowId: number, oldSessionId: string, newSessionId: string, win: BrowserWindow): void {
+        logger.info('Updating window session mapping', { windowId, oldSessionId, newSessionId });
+        
+        // Remove old mappings
+        this.windowSessions.delete(windowId);
+        this.sessionWindows.delete(oldSessionId);
+        
+        // Add new mappings
+        this.windowSessions.set(windowId, newSessionId);
+        this.sessionWindows.set(newSessionId, win);
+        
+        logger.info('Window session mapping updated', { 
+            windowId, 
+            newSessionId,
+            totalWindowSessions: this.windowSessions.size,
+            totalSessionWindows: this.sessionWindows.size
+        });
     }
 
     /**
@@ -88,15 +120,22 @@ export class AgentManager {
         // Return existing agent if available
         const existing = this.agents.get(sessionId);
         if (existing) {
-            console.log(`[AgentManager] Returning existing agent for session: ${sessionId}`);
+            logger.info('Returning existing agent', { sessionId });
             return existing;
         }
 
         // Create new agent
+        logger.info('Creating new agent', { sessionId });
         const agent = this.createAgent(sessionId);
         if (agent) {
             this.agents.set(sessionId, agent);
-            console.log(`[AgentManager] Created new agent for session: ${sessionId}, total agents: ${this.agents.size}`);
+            logger.info('Agent created successfully', { sessionId, totalAgents: this.agents.size });
+        } else {
+            logger.error('Failed to create agent', { 
+                sessionId, 
+                availableSessions: Array.from(this.sessionWindows.keys()),
+                availableWindows: Array.from(this.windowSessions.keys())
+            });
         }
         return agent;
     }
@@ -108,12 +147,16 @@ export class AgentManager {
         // Get the window for this session
         const sessionWindow = this.sessionWindows.get(sessionId);
         if (!sessionWindow) {
-            console.warn(`[AgentManager] Cannot create agent: no window for session ${sessionId}`);
+            logger.error('Cannot create agent: no window for session', { 
+                sessionId,
+                registeredSessions: Array.from(this.sessionWindows.keys()),
+                registeredWindows: Array.from(this.windowSessions.entries()).map(([wid, sid]) => ({ windowId: wid, sessionId: sid }))
+            });
             return null;
         }
 
         const integrationMode = configStore.getIntegrationMode() as IntegrationMode;
-        console.log(`[AgentManager] Creating agent for session ${sessionId}, mode: ${integrationMode}`);
+        logger.info('Creating agent', { sessionId, mode: integrationMode });
 
         // Inject CodeBuddy environment variables
         this.injectCodeBuddyEnv();
@@ -125,16 +168,39 @@ export class AgentManager {
                 const codeBuddyApiKey = configStore.getCodeBuddyApiKey();
                 const codeBuddyInternetEnv = configStore.getCodeBuddyInternetEnv();
                 
-                agent = new CodeBuddySDKRuntime(sessionWindow, codeBuddyApiKey, codeBuddyInternetEnv);
-                agent.initialize().catch(err => 
-                    console.error(`[AgentManager] CodeBuddy SDK init failed for ${sessionId}:`, err)
-                );
+                // Get cwd from authorized folders - bound at construction time
+                const authorizedFolders = permissionManager.getAuthorizedFolders();
+                const cwd = authorizedFolders.length > 0 ? authorizedFolders[0] : '';
+                logger.info('SDK Runtime configuration', { 
+                    cwd: cwd || 'NOT SET', 
+                    hasApiKey: !!codeBuddyApiKey,
+                    internetEnv: codeBuddyInternetEnv
+                });
+                
+                agent = new CodeBuddySDKRuntime(sessionWindow, codeBuddyApiKey, codeBuddyInternetEnv, cwd);
+                agent.initialize().catch(err => {
+                    const error = err as Error;
+                    logger.error('CodeBuddy SDK init failed', { 
+                        sessionId, 
+                        error: error.message, 
+                        stack: error.stack 
+                    });
+                });
 
             } else if (integrationMode === 'cli-codebuddy') {
+                // NOTE: CLI mode is deprecated, use SDK mode instead.
+                // This code path is preserved for backwards compatibility but 
+                // the UI no longer exposes CLI mode as an option.
+                logger.warn('CLI mode is deprecated, consider using SDK mode', { sessionId });
                 agent = new CLIAgentRuntime(sessionWindow);
-                agent.initialize().catch(err => 
-                    console.error(`[AgentManager] CodeBuddy CLI init failed for ${sessionId}:`, err)
-                );
+                agent.initialize().catch(err => {
+                    const error = err as Error;
+                    logger.error('CodeBuddy CLI init failed', { 
+                        sessionId, 
+                        error: error.message, 
+                        stack: error.stack 
+                    });
+                });
 
             } else {
                 // API mode (default)
@@ -146,11 +212,16 @@ export class AgentManager {
                         configStore.getModel(),
                         configStore.getApiUrl()
                     );
-                    agent.initialize().catch(err => 
-                        console.error(`[AgentManager] API Agent init failed for ${sessionId}:`, err)
-                    );
+                    agent.initialize().catch(err => {
+                        const error = err as Error;
+                        logger.error('API Agent init failed', { 
+                            sessionId, 
+                            error: error.message, 
+                            stack: error.stack 
+                        });
+                    });
                 } else {
-                    console.warn('[AgentManager] No API key configured');
+                    logger.error('No API key configured', { sessionId });
                     return null;
                 }
             }
@@ -163,7 +234,13 @@ export class AgentManager {
             return agent;
 
         } catch (err) {
-            console.error(`[AgentManager] Failed to create agent for ${sessionId}:`, err);
+            const error = err as Error;
+            logger.error('Failed to create agent', { 
+                sessionId, 
+                error: error.message, 
+                stack: error.stack,
+                integrationMode
+            });
             return null;
         }
     }
@@ -181,7 +258,11 @@ export class AgentManager {
             }
             process.env.CODEBUDDY_INTERNET_ENVIRONMENT = storedInternetEnv || 'ioa';
         } catch (err) {
-            console.error('[AgentManager] Failed to inject CodeBuddy env vars:', err);
+            const error = err as Error;
+            logger.error('Failed to inject CodeBuddy env vars', { 
+                error: error.message, 
+                stack: error.stack 
+            });
             process.env.CODEBUDDY_INTERNET_ENVIRONMENT = 'ioa';
         }
     }
@@ -190,6 +271,7 @@ export class AgentManager {
      * Destroy an agent for a specific session
      */
     public destroyAgent(sessionId: string): boolean {
+        logger.info('Destroying agent', { sessionId });
         const agent = this.agents.get(sessionId);
         if (agent) {
             try {
@@ -198,13 +280,20 @@ export class AgentManager {
                     agent.cleanup();
                 }
                 this.agents.delete(sessionId);
-                console.log(`[AgentManager] Destroyed agent for session: ${sessionId}, remaining: ${this.agents.size}`);
+                logger.info('Agent destroyed successfully', { sessionId, remainingAgents: this.agents.size });
                 return true;
             } catch (err) {
-                console.error(`[AgentManager] Error destroying agent for ${sessionId}:`, err);
+                const error = err as Error;
+                logger.error('Error destroying agent', { 
+                    sessionId, 
+                    error: error.message, 
+                    stack: error.stack 
+                });
                 this.agents.delete(sessionId);
                 return false;
             }
+        } else {
+            logger.warn('No agent found to destroy', { sessionId });
         }
         return false;
     }
@@ -213,7 +302,7 @@ export class AgentManager {
      * Destroy all agents (used on app quit)
      */
     public destroyAll(): void {
-        console.log(`[AgentManager] Destroying all agents (${this.agents.size} total)`);
+        logger.info('Destroying all agents', { totalAgents: this.agents.size });
         
         this.agents.forEach((agent, sessionId) => {
             try {
@@ -221,13 +310,19 @@ export class AgentManager {
                 if ('cleanup' in agent) {
                     agent.cleanup();
                 }
+                logger.info('Agent cleaned up', { sessionId });
             } catch (err) {
-                console.error(`[AgentManager] Error cleaning up agent ${sessionId}:`, err);
+                const error = err as Error;
+                logger.error('Error cleaning up agent', { 
+                    sessionId, 
+                    error: error.message, 
+                    stack: error.stack 
+                });
             }
         });
 
         this.agents.clear();
-        console.log('[AgentManager] All agents destroyed');
+        logger.info('All agents destroyed');
     }
 
     /**

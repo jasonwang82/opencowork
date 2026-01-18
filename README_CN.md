@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="./public/icon.png" width="100" height="100" alt="OpenCowork Logo">
+  <img src="./public/icon.png" width="100" height="100" alt="WorkBuddy Logo">
 </p>
 
-<h1 align="center">OpenCowork</h1>
+<h1 align="center">WorkBuddy</h1>
 
 <p align="center">
   开源桌面级 AI 助手
@@ -13,16 +13,16 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Safphere/opencowork/releases"><img src="https://img.shields.io/github/v/release/Safphere/opencowork?style=flat-square&color=orange" alt="Release"></a>
-  <a href="https://github.com/Safphere/opencowork/actions"><img src="https://img.shields.io/github/actions/workflow/status/Safphere/opencowork/release.yml?style=flat-square" alt="Build"></a>
-  <a href="./LICENSE"><img src="https://img.shields.io/github/license/Safphere/opencowork?style=flat-square" alt="License"></a>
+  <a href="https://github.com/Safphere/workbuddy/releases"><img src="https://img.shields.io/github/v/release/Safphere/workbuddy?style=flat-square&color=orange" alt="Release"></a>
+  <a href="https://github.com/Safphere/workbuddy/actions"><img src="https://img.shields.io/github/actions/workflow/status/Safphere/workbuddy/release.yml?style=flat-square" alt="Build"></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/github/license/Safphere/workbuddy?style=flat-square" alt="License"></a>
 </p>
 
 ---
 
 ## ⚠️ 风险提示
 
-OpenCowork 允许 AI 操作本地文件系统和终端，使用前请注意：
+WorkBuddy 允许 AI 操作本地文件系统和终端，使用前请注意：
 
 - AI 可能误删文件或执行错误命令
 - 可能存在提示词注入风险
@@ -37,10 +37,10 @@ OpenCowork 允许 AI 操作本地文件系统和终端，使用前请注意：
 ## 简介
 
 <p align="center">
-  <img src="https://i.meee.com.tw/uA5H9yG.png" width="400" alt="OpenCowork Demo">
+  <img src="https://i.meee.com.tw/uA5H9yG.png" width="400" alt="WorkBuddy Demo">
 </p>
 
-**OpenCowork** 是 Cowork 的开源版本，可以将个人电脑变成 AI 驱动的工作助手。
+**WorkBuddy** 是 Cowork 的开源版本，可以将个人电脑变成 AI 驱动的工作助手。
 
 支持接入任何具备 Agent 能力的模型（如 MiniMax、Claude、GPT 等），不绑定特定厂商。
 

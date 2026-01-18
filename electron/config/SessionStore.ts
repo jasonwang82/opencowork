@@ -2,12 +2,16 @@ import Store from 'electron-store';
 import { v4 as uuidv4 } from 'uuid';
 import Anthropic from '@anthropic-ai/sdk';
 
+export type SessionMode = 'chat' | 'work';
+
 export interface Session {
     id: string;
     title: string;
     createdAt: number;
     updatedAt: number;
-    messages: Anthropic.MessageParam[];
+    messages: Anthropic.MessageParam[];      // Legacy/backward compatibility
+    chatMessages?: Anthropic.MessageParam[]; // Chat mode messages
+    workMessages?: Anthropic.MessageParam[]; // Work mode messages
 }
 
 interface SessionStoreSchema {
@@ -25,7 +29,7 @@ class SessionStore {
 
     constructor() {
         this.store = new Store<SessionStoreSchema>({
-            name: 'opencowork-sessions',
+            name: 'workbuddy-sessions',
             defaults
         });
     }
@@ -54,7 +58,9 @@ class SessionStore {
             title: title || '新会话',
             createdAt: Date.now(),
             updatedAt: Date.now(),
-            messages: []
+            messages: [],
+            chatMessages: [],
+            workMessages: []
         };
         const sessions = this.store.get('sessions') || [];
         sessions.unshift(session); // Add to beginning
@@ -63,7 +69,7 @@ class SessionStore {
         return session;
     }
 
-    // Update session messages
+    // Update session messages (legacy - updates the 'messages' field)
     updateSession(id: string, messages: Anthropic.MessageParam[], title?: string): void {
         const sessions = this.store.get('sessions') || [];
         const index = sessions.findIndex(s => s.id === id);
@@ -90,6 +96,50 @@ class SessionStore {
         }
     }
 
+    // Update session messages by mode (chat or work)
+    updateSessionByMode(id: string, mode: SessionMode, messages: Anthropic.MessageParam[], title?: string): void {
+        const sessions = this.store.get('sessions') || [];
+        const index = sessions.findIndex(s => s.id === id);
+        if (index >= 0) {
+            if (mode === 'chat') {
+                sessions[index].chatMessages = messages;
+            } else {
+                sessions[index].workMessages = messages;
+            }
+            sessions[index].updatedAt = Date.now();
+            
+            // Auto-generate title from first user message if title is still default
+            if (title) {
+                sessions[index].title = title;
+            } else if (sessions[index].title === '新会话' && messages.length > 0) {
+                const firstUserMsg = messages.find(m => m.role === 'user');
+                if (firstUserMsg) {
+                    const text = typeof firstUserMsg.content === 'string'
+                        ? firstUserMsg.content
+                        : (Array.isArray(firstUserMsg.content)
+                            ? (firstUserMsg.content as Array<{ type: string; text?: string }>).find(b => b.type === 'text')?.text
+                            : '');
+                    if (text) {
+                        sessions[index].title = text.slice(0, 50) + (text.length > 50 ? '...' : '');
+                    }
+                }
+            }
+            this.store.set('sessions', sessions);
+        }
+    }
+
+    // Get messages by mode
+    getSessionMessages(id: string, mode: SessionMode): Anthropic.MessageParam[] {
+        const session = this.getSession(id);
+        if (!session) return [];
+        
+        if (mode === 'chat') {
+            return session.chatMessages || [];
+        } else {
+            return session.workMessages || [];
+        }
+    }
+
     // Delete session
     deleteSession(id: string): void {
         const sessions = (this.store.get('sessions') || []).filter(s => s.id !== id);
@@ -97,6 +147,12 @@ class SessionStore {
         if (this.store.get('currentSessionId') === id) {
             this.store.set('currentSessionId', sessions.length > 0 ? sessions[0].id : null);
         }
+    }
+
+    // Clear all sessions
+    clearAllSessions(): void {
+        this.store.set('sessions', []);
+        this.store.set('currentSessionId', null);
     }
 
     // Get current session ID

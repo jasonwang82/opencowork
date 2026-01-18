@@ -1,15 +1,22 @@
 import { app, BrowserWindow, shell, ipcMain, screen, dialog, globalShortcut, Tray, Menu, nativeImage } from 'electron'
 import { fileURLToPath } from 'node:url'
+import { createRequire } from 'node:module'
 import path from 'node:path'
 import os from 'node:os'
 import fs from 'node:fs'
-import { spawn } from 'node:child_process'
+import https from 'node:https'
+import { spawn, exec, execSync } from 'node:child_process'
 import dotenv from 'dotenv'
 import { agentManager } from './agent/AgentManager'
-import { configStore } from './config/ConfigStore'
+import { configStore, type UserInfo } from './config/ConfigStore'
 import { sessionStore } from './config/SessionStore'
 import { logger, getLogs, clearLogs } from './utils/logger'
+import { permissionManager } from './agent/security/PermissionManager'
 import Anthropic from '@anthropic-ai/sdk'
+import type { AuthEnvironment } from '@tencent-ai/agent-sdk'
+import AdmZip from 'adm-zip'
+
+const require = createRequire(import.meta.url)
 
 // Extend App type to include isQuitting property
 declare global {
@@ -101,6 +108,10 @@ if (VITE_DEV_SERVER_URL) {
   app.setPath('userData', devUserData);
 }
 
+// Set application name early (before app.whenReady) to ensure menu bar shows "WorkBuddy"
+// This MUST be called as early as possible for macOS to pick up the correct name
+app.setName('WorkBuddy')
+
 // Internal MCP Server Runner
 // MiniMax startup removed
 // --- Normal App Initialization ---
@@ -156,7 +167,7 @@ app.on('child-process-gone', (_event: unknown, details: { type: string; reason: 
 })
 
 app.whenReady().then(() => {
-  // Export stored API keys to environment variables FIRST (before any other initialization)
+  // Export stored API keys to environment variables
   try {
     const storedCodeBuddyApiKey = configStore.getCodeBuddyApiKey()
     const storedCodeBuddyInternetEnv = configStore.getCodeBuddyInternetEnv()
@@ -189,7 +200,7 @@ app.whenReady().then(() => {
   })
 
   // Set App User Model ID for Windows notifications
-  app.setAppUserModelId('com.opencowork.app')
+  app.setAppUserModelId('com.workbuddy.app')
 
   // Set app icon for macOS dock
   if (process.platform === 'darwin') {
@@ -206,7 +217,7 @@ app.whenReady().then(() => {
 
   // Register Protocol Client
   if (app.isPackaged) {
-    app.setAsDefaultProtocolClient('opencowork')
+    app.setAsDefaultProtocolClient('workbuddy')
   } else {
     console.log('Skipping protocol registration in Dev mode.')
   }
@@ -224,13 +235,86 @@ app.whenReady().then(() => {
     agentManager.setFloatingBallWindow(floatingBallWin)
   }
 
-  // 4. Register keyboard shortcut for new window (Cmd/Ctrl+N)
+  // 4. Create application menu (macOS)
+  if (process.platform === 'darwin') {
+    const template: Electron.MenuItemConstructorOptions[] = [
+      {
+        label: 'WorkBuddy',
+        submenu: [
+          {
+            label: 'About WorkBuddy',
+            click: () => {
+              // Send event to renderer to show About dialog
+              BrowserWindow.getAllWindows().forEach(win => {
+                win.webContents.send('app:show-about')
+              })
+            }
+          },
+          { type: 'separator' },
+          {
+            label: 'Services',
+            role: 'services',
+            submenu: []
+          },
+          { type: 'separator' },
+          {
+            label: 'Hide WorkBuddy',
+            accelerator: 'Command+H',
+            role: 'hide'
+          },
+          {
+            label: 'Hide Others',
+            accelerator: 'Command+Shift+H',
+            role: 'hideOthers'
+          },
+          {
+            label: 'Show All',
+            role: 'unhide'
+          },
+          { type: 'separator' },
+          {
+            label: 'Quit WorkBuddy',
+            accelerator: 'Command+Q',
+            click: () => {
+              app.quit()
+            }
+          }
+        ]
+      },
+      {
+        label: 'Edit',
+        submenu: [
+          { label: 'Undo', accelerator: 'Command+Z', role: 'undo' },
+          { label: 'Redo', accelerator: 'Shift+Command+Z', role: 'redo' },
+          { type: 'separator' },
+          { label: 'Cut', accelerator: 'Command+X', role: 'cut' },
+          { label: 'Copy', accelerator: 'Command+C', role: 'copy' },
+          { label: 'Paste', accelerator: 'Command+V', role: 'paste' },
+          { label: 'Select All', accelerator: 'Command+A', role: 'selectAll' }
+        ]
+      },
+      {
+        label: 'Window',
+        submenu: [
+          { label: 'Minimize', accelerator: 'Command+M', role: 'minimize' },
+          { label: 'Close', accelerator: 'Command+W', role: 'close' },
+          { type: 'separator' },
+          { label: 'Bring All to Front', role: 'front' }
+        ]
+      }
+    ]
+
+    const menu = Menu.buildFromTemplate(template)
+    Menu.setApplicationMenu(menu)
+  }
+
+  // 5. Register keyboard shortcut for new window (Cmd/Ctrl+N)
   globalShortcut.register('CommandOrControl+N', () => {
     console.log('[main] Cmd/Ctrl+N pressed - creating new window')
     createSessionWindow()
   })
 
-  // 5. Create system tray
+  // 6. Create system tray
   createTray()
 
   // 5. Register global shortcut
@@ -254,6 +338,26 @@ app.whenReady().then(() => {
   }
 
   console.log('WorkBuddy started. Press Alt+Space to toggle floating ball.')
+
+  // 7. Auto-login check on startup
+  // We delay this slightly to allow windows to be ready
+  setTimeout(async () => {
+    const isLoggedIn = configStore.isLoggedIn()
+    console.log('[Main] Checking auth status on startup, isLoggedIn:', isLoggedIn)
+    
+    if (!isLoggedIn) {
+      console.log('[Main] Not logged in, user will need to click login button')
+      // Don't auto-login on startup - let user click the login button
+      // This avoids blocking the main process and provides better UX
+      broadcastUserChange(null)
+    } else {
+      // Broadcast existing user info to windows
+      const userInfo = configStore.getUserInfo()
+      console.log('[Main] Already logged in as:', userInfo?.userName)
+      console.log('[Main] User info:', userInfo)
+      broadcastUserChange(userInfo)
+    }
+  }, 2000)
 })
 
 
@@ -263,9 +367,40 @@ app.whenReady().then(() => {
 
 ipcMain.handle('agent:send-message', async (_event, payload: { sessionId: string, message: string | { content: string, images: string[] } }) => {
   const { sessionId, message } = payload
+  logger.info('Processing message', { 
+    sessionId, 
+    messageType: typeof message === 'string' ? 'text' : 'multimodal',
+    messageLength: typeof message === 'string' ? message.length : message.content.length
+  })
+  
   const agent = agentManager.getOrCreateAgent(sessionId)
-  if (!agent) throw new Error('Agent not initialized')
-  return await agent.processUserMessage(message)
+  if (!agent) {
+    const error = 'Agent not initialized'
+    logger.error('Failed to process message: agent not initialized', { 
+      sessionId,
+      registeredSessions: agentManager.getAllSessionWindows().map(s => s.sessionId)
+    })
+    throw new Error(error)
+  }
+  
+  // Fire and forget - don't block the main process
+  // Results are streamed via IPC events (agent:stream-token, agent:history-update)
+  agent.processUserMessage(message).catch(err => {
+    const error = err as Error
+    logger.error('Message processing error', { 
+      sessionId, 
+      error: error.message, 
+      stack: error.stack 
+    })
+    // Broadcast error to renderer
+    const win = agentManager.getWindowForSession(sessionId)
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('agent:error', error.message || 'Message processing failed')
+      win.webContents.send('agent:complete', null)
+    }
+  })
+  
+  return { success: true }
 })
 
 ipcMain.handle('agent:abort', (_, sessionId?: string) => {
@@ -281,6 +416,27 @@ ipcMain.handle('agent:abort', (_, sessionId?: string) => {
       agent?.abort()
     }
   }
+})
+
+// Clear history for a session (used when clicking the trash button)
+ipcMain.handle('agent:clear-history', (_, sessionId?: string, mode?: 'chat' | 'work') => {
+  const targetSessionId = sessionId || sessionStore.getCurrentSessionId()
+  if (targetSessionId) {
+    const agent = agentManager.getAgent(targetSessionId)
+    if (agent) {
+      agent.clearHistory()
+      logger.info('Cleared history for session', { sessionId: targetSessionId, mode })
+    }
+    // Clear the session messages in the store for the specific mode
+    if (mode) {
+      sessionStore.updateSessionByMode(targetSessionId, mode, [])
+    } else {
+      // Legacy: clear both modes
+      sessionStore.updateSessionByMode(targetSessionId, 'chat', [])
+      sessionStore.updateSessionByMode(targetSessionId, 'work', [])
+    }
+  }
+  return { success: true }
 })
 
 ipcMain.handle('agent:confirm-response', (_, { id, approved, remember, tool, path, sessionId }: { id: string, approved: boolean, remember?: boolean, tool?: string, path?: string, sessionId?: string }) => {
@@ -303,11 +459,57 @@ ipcMain.handle('window:new-session', () => {
   return { success: true, windowId: win.id }
 })
 
+// Create new window with a specific folder as working directory
+ipcMain.handle('window:new-with-folder', async (_, folderPath: string) => {
+  logger.info('Creating new window with folder', { folderPath })
+  
+  // Create a new session with folder name as title
+  const folderName = folderPath.split(/[\\/]/).pop() || '新会话'
+  const session = sessionStore.createSession(`工作区: ${folderName}`)
+  
+  // Set this folder as the primary working directory
+  const folders = configStore.getAll().authorizedFolders || []
+  const newFolders = [folderPath, ...folders.filter(f => f !== folderPath)]
+  configStore.set('authorizedFolders', newFolders)
+  permissionManager.syncFromConfig()
+  
+  // Create the window with this session
+  const win = createSessionWindow(session.id)
+  
+  logger.info('New window created with folder', { 
+    windowId: win.id, 
+    sessionId: session.id, 
+    folderPath 
+  })
+  
+  return { success: true, windowId: win.id, sessionId: session.id }
+})
+
 // Legacy handler for compatibility - now creates a new window
 ipcMain.handle('agent:new-session', () => {
   console.log('[main] agent:new-session - creating new window...')
   const win = createSessionWindow()
   return { success: true, windowId: win.id }
+})
+
+// Get app information for About dialog
+ipcMain.handle('app:get-info', () => {
+  const packageJson = require('../package.json')
+  const integrationMode = configStore.getIntegrationMode()
+  
+  // Map integration mode to display name
+  const integrationModeNames: Record<string, string> = {
+    'api': 'API 模式',
+    'cli-codebuddy': 'CodeBuddy CLI 模式',
+    'sdk-codebuddy': 'CodeBuddy SDK 模式'
+  }
+  
+  return {
+    name: 'WorkBuddy',
+    version: app.getVersion() || packageJson.version,
+    description: 'WorkBuddy - 你的数字工友',
+    integrationMode: integrationModeNames[integrationMode] || integrationMode
+  }
 })
 
 // Session Management
@@ -316,7 +518,15 @@ ipcMain.handle('session:list', () => {
 })
 
 ipcMain.handle('session:get', (_, id: string) => {
-  return sessionStore.getSession(id)
+  const session = sessionStore.getSession(id)
+  if (session) {
+    return {
+      ...session,
+      chatMessages: session.chatMessages || [],
+      workMessages: session.workMessages || session.messages || []
+    }
+  }
+  return null
 })
 
 ipcMain.handle('session:load', (_, id: string) => {
@@ -333,15 +543,24 @@ ipcMain.handle('session:load', (_, id: string) => {
   return { error: 'Session not found' }
 })
 
-ipcMain.handle('session:save', (_, messages: Anthropic.MessageParam[]) => {
+ipcMain.handle('session:save', (_, messages: Anthropic.MessageParam[], mode?: 'chat' | 'work') => {
   const currentId = sessionStore.getCurrentSessionId()
   if (currentId) {
-    sessionStore.updateSession(currentId, messages)
+    if (mode) {
+      sessionStore.updateSessionByMode(currentId, mode, messages)
+    } else {
+      // Legacy fallback - save to work mode by default
+      sessionStore.updateSessionByMode(currentId, 'work', messages)
+    }
     return { success: true }
   }
   // Create new session if none exists
   const session = sessionStore.createSession()
-  sessionStore.updateSession(session.id, messages)
+  if (mode) {
+    sessionStore.updateSessionByMode(session.id, mode, messages)
+  } else {
+    sessionStore.updateSessionByMode(session.id, 'work', messages)
+  }
   return { success: true, sessionId: session.id }
 })
 
@@ -352,9 +571,29 @@ ipcMain.handle('session:delete', (_, id: string) => {
   return { success: true }
 })
 
+ipcMain.handle('session:clear-all', () => {
+  // Destroy all agents
+  agentManager.destroyAll()
+  // Clear all sessions
+  sessionStore.clearAllSessions()
+  // Create a new empty session
+  const newSessionId = sessionStore.createSession()
+  return { success: true, newSessionId }
+})
+
 ipcMain.handle('session:current', () => {
   const id = sessionStore.getCurrentSessionId()
-  return id ? sessionStore.getSession(id) : null
+  if (id) {
+    const session = sessionStore.getSession(id)
+    if (session) {
+      return {
+        ...session,
+        chatMessages: session.chatMessages || [],
+        workMessages: session.workMessages || session.messages || []
+      }
+    }
+  }
+  return null
 })
 
 // Session switch - with multi-agent concurrency, each session has its own agent
@@ -363,14 +602,13 @@ ipcMain.handle('session:switch', async (_, targetSessionId: string) => {
   console.log('[main] Switching session to:', targetSessionId)
   
   try {
-    // 1. Save current session state
+    // 1. Save current session state (both modes are saved separately via frontend)
     const currentId = sessionStore.getCurrentSessionId()
     if (currentId) {
       const currentAgent = agentManager.getAgent(currentId)
       if (currentAgent) {
-        const history = currentAgent.getHistory()
-        sessionStore.updateSession(currentId, history)
-        console.log('[main] Saved current session:', currentId, 'messages:', history.length)
+        // Note: Agent history is per-mode now, frontend handles saving
+        console.log('[main] Current session agent exists:', currentId)
       }
     }
     
@@ -379,14 +617,20 @@ ipcMain.handle('session:switch', async (_, targetSessionId: string) => {
     if (session) {
       const targetAgent = agentManager.getOrCreateAgent(targetSessionId)
       if (targetAgent) {
-        // Load history if agent is new (history is empty)
-        if (targetAgent.getHistory().length === 0 && session.messages.length > 0) {
-          targetAgent.loadHistory(session.messages)
+        // Load work history by default (agent uses single history internally)
+        const workMessages = session.workMessages || session.messages || []
+        if (targetAgent.getHistory().length === 0 && workMessages.length > 0) {
+          targetAgent.loadHistory(workMessages)
         }
       }
       sessionStore.setCurrentSession(targetSessionId)
-      console.log('[main] Switched to session:', targetSessionId, 'messages:', session.messages.length)
-      return { success: true, session }
+      console.log('[main] Switched to session:', targetSessionId)
+      return { 
+        success: true, 
+        session,
+        chatMessages: session.chatMessages || [],
+        workMessages: session.workMessages || session.messages || []
+      }
     } else {
       console.error('[main] Session not found:', targetSessionId)
       return { success: false, error: 'Session not found' }
@@ -450,7 +694,59 @@ ipcMain.handle('agent:set-working-dir', (_, folderPath: string) => {
   const folders = configStore.getAll().authorizedFolders || []
   const newFolders = [folderPath, ...folders.filter(f => f !== folderPath)]
   configStore.set('authorizedFolders', newFolders)
+  // Sync permissionManager cache
+  permissionManager.syncFromConfig()
+  logger.info('Set working directory', { folderPath, newFolders })
   return true
+})
+
+// Switch workspace: destroy current agent and create a new session with new working directory
+ipcMain.handle('agent:switch-workspace', async (event, payload: { sessionId: string, newWorkingDir: string }) => {
+  const { sessionId, newWorkingDir } = payload
+  logger.info('Switch workspace requested', { sessionId, newWorkingDir })
+  
+  try {
+    // Get the window that sent this request
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win) {
+      const errorMsg = 'Cannot switch workspace: window not found'
+      logger.error(errorMsg, { sessionId, newWorkingDir })
+      return { success: false, error: errorMsg }
+    }
+    
+    // 1. Destroy current agent for this session
+    logger.info('Destroying agent for session', { sessionId })
+    agentManager.destroyAgent(sessionId)
+    
+    // 2. Set new working directory as primary
+    const folders = configStore.getAll().authorizedFolders || []
+    const newFolders = [newWorkingDir, ...folders.filter(f => f !== newWorkingDir)]
+    configStore.set('authorizedFolders', newFolders)
+    // Sync permissionManager cache with new folders
+    permissionManager.syncFromConfig()
+    logger.info('Updated authorized folders', { newFolders })
+    
+    // 3. Create a new session (this ensures fresh context with new cwd)
+    const folderName = newWorkingDir.split(/[\\/]/).pop() || '新会话'
+    const newSession = sessionStore.createSession(`工作区: ${folderName}`)
+    logger.info('Created new session', { newSessionId: newSession.id, folderName })
+    
+    // 4. Update window-session mapping so the window is associated with new session
+    agentManager.updateWindowSession(win.id, sessionId, newSession.id, win)
+    logger.info('Updated window-session mapping', { windowId: win.id, oldSessionId: sessionId, newSessionId: newSession.id })
+    
+    logger.info('Workspace switch completed successfully', { newWorkingDir, newSessionId: newSession.id })
+    return { success: true, workingDir: newWorkingDir, newSessionId: newSession.id }
+  } catch (error: unknown) {
+    const err = error as Error
+    logger.error('Workspace switch failed', { 
+      sessionId, 
+      newWorkingDir, 
+      error: err.message, 
+      stack: err.stack 
+    })
+    return { success: false, error: err.message || 'Workspace switch failed' }
+  }
 })
 
 ipcMain.handle('config:get-all', () => configStore.getAll())
@@ -470,6 +766,266 @@ ipcMain.handle('config:set-all', (_, cfg) => {
   // Destroy all agents so they get recreated with new settings
   agentManager.destroyAll()
   console.log('[main] Settings saved, agents will be recreated with new config on next message')
+})
+
+// Setup handlers
+ipcMain.handle('setup:check', () => {
+  return { complete: configStore.isSetupComplete() }
+})
+
+ipcMain.handle('setup:run-step', async (_, step: string) => {
+  logger.info('Running setup step', { step })
+  
+  try {
+    switch (step) {
+      case 'check-environment':
+        // Check system environment
+        return { 
+          success: true, 
+          data: { 
+            platform: process.platform,
+            arch: process.arch,
+            nodeVersion: process.version
+          }
+        }
+      
+      case 'init-config':
+        // Initialize default configuration
+        if (!configStore.isSetupComplete()) {
+          // Already has defaults, just verify
+        }
+        return { success: true }
+      
+      case 'preload-sdk':
+        // Preload SDK by importing it
+        try {
+          const sdk = await import('@anthropic-ai/sdk')
+          logger.info('SDK preloaded successfully', { version: sdk.Anthropic.prototype.constructor.name })
+        } catch (e) {
+          logger.warn('SDK preload skipped (optional)', { error: (e as Error).message })
+        }
+        return { success: true }
+      
+      case 'verify-resources': {
+        // Verify resources directory exists
+        const resourcesPath = app.isPackaged
+          ? path.join(process.resourcesPath, 'resources')
+          : path.join(__dirname, '..', 'resources')
+        const skillsPath = path.join(resourcesPath, 'skills')
+        
+        const fs = await import('fs/promises')
+        try {
+          await fs.access(skillsPath)
+          const skills = await fs.readdir(skillsPath)
+          return { success: true, data: { skillsCount: skills.length } }
+        } catch {
+          return { success: true, data: { skillsCount: 0, warning: 'Skills directory not found' } }
+        }
+      }
+      
+      case 'install-skills': {
+        // Download and install official skills to ~/.codebuddy/skills
+        const SKILLS_ZIP_URL = 'https://cnb.cool/codebuddy/codebuddy/-/git/raw/master/skills/skills.zip?download=true'
+        const codebuddyDir = path.join(os.homedir(), '.codebuddy')
+        const targetSkillsPath = path.join(codebuddyDir, 'skills')
+        
+        const fsPromises = await import('fs/promises')
+        
+        try {
+          // Ensure .codebuddy directory exists
+          await fsPromises.mkdir(codebuddyDir, { recursive: true })
+          
+          // Get list of existing skill directories before extraction
+          const existingSkillsBefore = new Set<string>()
+          try {
+            await fsPromises.access(targetSkillsPath)
+            const dirs = await fsPromises.readdir(targetSkillsPath)
+            for (const dir of dirs) {
+              const dirPath = path.join(targetSkillsPath, dir)
+              const stat = await fsPromises.stat(dirPath)
+              if (stat.isDirectory()) {
+                existingSkillsBefore.add(dir)
+              }
+            }
+          } catch {
+            // Directory doesn't exist or is empty, that's fine
+          }
+          
+          // Download ZIP file
+          logger.info('Downloading skills zip from', { url: SKILLS_ZIP_URL })
+          
+          const zipBuffer = await new Promise<Buffer>((resolve, reject) => {
+            https.get(SKILLS_ZIP_URL, (response) => {
+              if (response.statusCode !== 200) {
+                reject(new Error(`Failed to download: ${response.statusCode} ${response.statusMessage}`))
+                return
+              }
+              
+              const chunks: Buffer[] = []
+              response.on('data', (chunk: Buffer) => {
+                chunks.push(chunk)
+              })
+              response.on('end', () => {
+                resolve(Buffer.concat(chunks))
+              })
+              response.on('error', (err) => {
+                reject(err)
+              })
+            }).on('error', (err) => {
+              reject(err)
+            })
+          })
+          
+          logger.info('ZIP file downloaded', { size: zipBuffer.length })
+          
+          // Extract ZIP file
+          const zip = new AdmZip(zipBuffer)
+          const zipEntries = zip.getEntries()
+          
+          // Ensure skills directory exists
+          await fsPromises.mkdir(targetSkillsPath, { recursive: true })
+          
+          // Extract files, checking for existing directories with same names
+          for (const entry of zipEntries) {
+            // Skip __MACOSX and ._ files
+            if (entry.entryName.startsWith('__MACOSX') || entry.entryName.includes('/._')) {
+              continue
+            }
+            
+            // Remove 'skills/' prefix if exists
+            let relativePath = entry.entryName
+            if (relativePath.startsWith('skills/')) {
+              relativePath = relativePath.substring(7)
+            }
+            
+            if (!relativePath) continue
+            
+            const targetPath = path.join(targetSkillsPath, relativePath)
+            
+            // If it's a directory
+            if (entry.isDirectory) {
+              const dirName = path.basename(targetPath)
+              const parentDir = path.dirname(targetPath)
+              
+              // Check if parent directory has a directory with the same name
+              try {
+                const parentItems = await fsPromises.readdir(parentDir)
+                if (parentItems.includes(dirName)) {
+                  const existingPath = path.join(parentDir, dirName)
+                  const stat = await fsPromises.stat(existingPath)
+                  if (stat.isDirectory()) {
+                    logger.info('Skipping existing directory', { path: existingPath })
+                    continue
+                  }
+                }
+              } catch {
+                // Parent directory doesn't exist, continue creating
+              }
+              
+              // Create directory
+              await fsPromises.mkdir(targetPath, { recursive: true })
+            } else {
+              // If it's a file, check if parent directory has a directory with the same name
+              const fileName = path.basename(targetPath)
+              const parentDir = path.dirname(targetPath)
+              
+              try {
+                const parentItems = await fsPromises.readdir(parentDir)
+                if (parentItems.includes(fileName)) {
+                  const existingPath = path.join(parentDir, fileName)
+                  const stat = await fsPromises.stat(existingPath)
+                  if (stat.isDirectory()) {
+                    // Directory exists with same name, skip file
+                    logger.info('Skipping file, directory exists with same name', { path: existingPath })
+                    continue
+                  }
+                }
+              } catch {
+                // Parent directory doesn't exist, create it
+                await fsPromises.mkdir(parentDir, { recursive: true })
+              }
+              
+              // Extract file content
+              const content = entry.getData()
+              await fsPromises.writeFile(targetPath, content)
+            }
+          }
+          
+          // After extraction, count skill directories (top-level directories in targetSkillsPath)
+          let extractedCount = 0
+          let skippedCount = 0
+          
+          try {
+            const existingSkillsAfter = new Set<string>()
+            const dirs = await fsPromises.readdir(targetSkillsPath)
+            for (const dir of dirs) {
+              const dirPath = path.join(targetSkillsPath, dir)
+              const stat = await fsPromises.stat(dirPath)
+              if (stat.isDirectory()) {
+                existingSkillsAfter.add(dir)
+              }
+            }
+            
+            // Compare with before: new directories = extracted, existing = skipped
+            for (const skillDir of existingSkillsAfter) {
+              if (existingSkillsBefore.has(skillDir)) {
+                skippedCount++
+              } else {
+                extractedCount++
+              }
+            }
+          } catch (error) {
+            logger.warn('Could not count skill directories after extraction', { error: (error as Error).message })
+            // Fallback: if we can't count properly, return 0 to avoid misleading numbers
+            extractedCount = 0
+            skippedCount = 0
+          }
+          
+          logger.info('Skills extracted successfully', {
+            targetPath: targetSkillsPath,
+            extractedSkillsCount: extractedCount,
+            skippedSkillsCount: skippedCount
+          })
+          
+          return {
+            success: true,
+            data: {
+              targetPath: targetSkillsPath,
+              extractedCount,
+              skippedCount
+            }
+          }
+        } catch (error) {
+          logger.warn('Failed to install skills', {
+            error: (error as Error).message,
+            stack: (error as Error).stack
+          })
+          // Don't fail setup if skills installation fails - it's not critical
+          return {
+            success: true,
+            data: {
+              warning: `Skills installation failed: ${(error as Error).message}`
+            }
+          }
+        }
+      }
+      
+      case 'complete':
+        configStore.setSetupComplete(true)
+        return { success: true }
+      
+      default:
+        return { success: false, error: 'Unknown setup step' }
+    }
+  } catch (error) {
+    logger.error('Setup step failed', { step, error: (error as Error).message })
+    return { success: false, error: (error as Error).message }
+  }
+})
+
+ipcMain.handle('setup:complete', () => {
+  configStore.setSetupComplete(true)
+  return { success: true }
 })
 
 // Log viewer handlers
@@ -636,8 +1192,320 @@ ipcMain.handle('window:maximize', () => {
 })
 ipcMain.handle('window:close', () => mainWin?.hide())
 
+// Authentication Handlers
+let isAuthenticating = false
+
+// Broadcast user info change to all windows
+function broadcastUserChange(userInfo: UserInfo | null) {
+  BrowserWindow.getAllWindows().forEach(win => {
+    if (!win.isDestroyed()) {
+      win.webContents.send('auth:user-changed', userInfo)
+    }
+  })
+}
+
+/**
+ * Perform SDK-based authentication with external browser
+ * This function is used both for startup auto-login and manual login via IPC
+ * 
+ * @param environment - Auth environment: 'external' | 'internal' | 'ioa' | 'cloudhosted'
+ * @param endpoint - Optional custom endpoint for self-hosted environments
+ * @returns Authentication result with success status and user info or error
+ */
+async function performSDKAuthentication(
+  environment: AuthEnvironment = 'ioa',
+  endpoint?: string
+): Promise<{ success: boolean; userInfo?: UserInfo; error?: string }> {
+  if (isAuthenticating) {
+    logger.warn('SDK authentication already in progress')
+    return { success: false, error: '登录正在进行中' }
+  }
+  
+  isAuthenticating = true
+  logger.info('Starting SDK Authentication', { environment, endpoint })
+  
+  // Notify windows that login is starting
+  BrowserWindow.getAllWindows().forEach(win => {
+    if (!win.isDestroyed()) {
+      win.webContents.send('auth:login-pending')
+    }
+  })
+  
+  try {
+    // Set CODEBUDDY_CODE_PATH environment variable for SDK to find CLI
+    // This is required because SDK needs to know where the codebuddy CLI is located
+    if (!process.env.CODEBUDDY_CODE_PATH) {
+      let codebuddyCliPath: string | null = null
+      
+      // First try: use findCodeBuddyPath with system Node.js
+      const systemNodePath = findSystemNodePath()
+      if (systemNodePath) {
+        codebuddyCliPath = findCodeBuddyPath(systemNodePath)
+      }
+      
+      // Second try: use execSync to find codebuddy in PATH (like CodeBuddySDKRuntime does)
+      if (!codebuddyCliPath) {
+        try {
+          const home = process.env.HOME || ''
+          const nvmDir = `${home}/.nvm/versions/node`
+          const standardPaths = '/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin'
+          const nvmPaths = fs.existsSync(nvmDir)
+            ? fs.readdirSync(nvmDir).filter((v: string) => v.startsWith('v')).map((v: string) => `${nvmDir}/${v}/bin`).join(':')
+            : ''
+          const extendedPath = `${systemNodePath ? path.dirname(systemNodePath) : ''}:${nvmPaths}:${process.env.PATH || ''}:${standardPaths}`
+          
+          codebuddyCliPath = execSync('which codebuddy', {
+            encoding: 'utf-8',
+            env: { ...process.env, PATH: extendedPath, HOME: home },
+            shell: '/bin/bash'
+          }).trim()
+        } catch (e) {
+          logger.warn('Failed to find codebuddy with which command', { error: (e as Error).message })
+        }
+      }
+      
+      if (codebuddyCliPath) {
+        process.env.CODEBUDDY_CODE_PATH = codebuddyCliPath
+        logger.info('Set CODEBUDDY_CODE_PATH', { path: codebuddyCliPath })
+      } else {
+        logger.warn('CodeBuddy CLI not found, SDK auth may fail. Make sure codebuddy is installed: npm install -g @tencent-ai/codebuddy-code')
+      }
+    } else {
+      logger.info('Using existing CODEBUDDY_CODE_PATH', { path: process.env.CODEBUDDY_CODE_PATH })
+    }
+    
+    // Dynamic import like the working demo (auth-demo-e)
+    const { unstable_v2_authenticate } = await import('@tencent-ai/agent-sdk')
+    
+    const result = await unstable_v2_authenticate({
+      environment: endpoint ? undefined : environment,
+      endpoint: endpoint,
+      onAuthUrl: async (authState) => {
+        logger.info('Auth URL received', { authUrl: authState.authUrl })
+        console.log('Auth URL:', authState.authUrl)
+        
+        if (authState.authUrl) {
+          // Use child_process.exec to open browser (works in all contexts including webview)
+          // This is more reliable than shell.openExternal in some environments
+          const platform = process.platform
+          let command: string
+          
+          if (platform === 'darwin') {
+            command = `open "${authState.authUrl}"`
+          } else if (platform === 'win32') {
+            command = `start "" "${authState.authUrl}"`
+          } else {
+            command = `xdg-open "${authState.authUrl}"`
+          }
+          
+          try {
+            // Use child_process.exec first (works in all contexts)
+            await new Promise<void>((resolve, reject) => {
+              exec(command, (error) => {
+                if (error) {
+                  logger.warn('Failed to open browser via exec, trying shell.openExternal', { error: error.message })
+                  // Fallback to shell.openExternal if exec fails (only works in main process)
+                  if (shell && typeof shell.openExternal === 'function') {
+                    shell.openExternal(authState.authUrl)
+                      .then(() => resolve())
+                      .catch((shellError) => {
+                        logger.error('Both exec and shell.openExternal failed', { 
+                          execError: error.message, 
+                          shellError: (shellError as Error).message 
+                        })
+                        reject(shellError)
+                      })
+                  } else {
+                    reject(error)
+                  }
+                } else {
+                  resolve()
+                }
+              })
+            })
+            logger.info('Browser opened successfully')
+          } catch (openError) {
+            logger.error('Failed to open browser', { error: (openError as Error).message })
+            // Continue anyway - user can manually open the URL
+          }
+          
+          // Notify frontend that we're waiting for browser authentication
+          BrowserWindow.getAllWindows().forEach(win => {
+            if (!win.isDestroyed()) {
+              win.webContents.send('auth:waiting-browser', { authUrl: authState.authUrl })
+            }
+          })
+        }
+      },
+      timeout: 300000, // 5 minutes timeout
+    })
+    
+    logger.info('Authentication completed!', { 
+      userId: result.userinfo.userId, 
+      userName: result.userinfo.userName,
+      hasToken: !!result.userinfo.token
+    })
+    
+    // Save user info from SDK response
+    const userInfo: UserInfo = {
+      userId: result.userinfo.userId,
+      userName: result.userinfo.userName,
+      userNickname: result.userinfo.userNickname,
+      token: result.userinfo.token,
+      enterpriseId: result.userinfo.enterpriseId,
+      enterprise: result.userinfo.enterprise,
+    }
+    
+    configStore.setUserInfo(userInfo)
+    broadcastUserChange(userInfo)
+    
+    logger.info('SDK Authentication Successful')
+    isAuthenticating = false
+    return { success: true, userInfo }
+  } catch (error) {
+    isAuthenticating = false
+    const err = error as Error
+    logger.error('SDK Authentication Failed', { 
+      errorName: err.name,
+      errorMessage: err.message, 
+      environment 
+    })
+    
+    // Notify windows that login failed so they can reset their state
+    BrowserWindow.getAllWindows().forEach(win => {
+      if (!win.isDestroyed()) {
+        win.webContents.send('auth:login-failed', { error: err.message })
+      }
+    })
+    
+    return { 
+      success: false, 
+      error: err.message || '登录失败',
+    }
+  }
+}
+
+// Helper to execute codebuddy commands
+function executeCodeBuddyAuthCommand(args: string[]): Promise<{ success: boolean; output?: string; error?: string }> {
+  return new Promise((resolve) => {
+    const home = process.env.HOME || ''
+    const systemNodePath = findSystemNodePath()
+    
+    if (!systemNodePath) {
+      resolve({ success: false, error: '未找到 Node.js' })
+      return
+    }
+    
+    // Find codebuddy CLI
+    const nodeDir = path.dirname(systemNodePath)
+    let codebuddyPath = path.join(nodeDir, 'codebuddy')
+    
+    if (!fs.existsSync(codebuddyPath)) {
+      const otherPaths = [
+        `${home}/.npm-global/bin/codebuddy`,
+        '/usr/local/bin/codebuddy',
+        '/opt/homebrew/bin/codebuddy',
+      ]
+      for (const p of otherPaths) {
+        if (fs.existsSync(p)) {
+          codebuddyPath = p
+          break
+        }
+      }
+    }
+    
+    if (!fs.existsSync(codebuddyPath)) {
+      resolve({ success: false, error: 'CodeBuddy CLI 未安装' })
+      return
+    }
+    
+    const nvmDir = `${home}/.nvm/versions/node`
+    const standardPaths = '/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin'
+    const nvmPaths = fs.existsSync(nvmDir)
+      ? fs.readdirSync(nvmDir).filter((v: string) => v.startsWith('v')).map((v: string) => `${nvmDir}/${v}/bin`).join(':')
+      : ''
+    const pathEnv = `${path.dirname(systemNodePath)}:${nvmPaths}:${process.env.PATH || ''}:${standardPaths}`
+
+    const codebuddyProcess = spawn(systemNodePath, [codebuddyPath, ...args], {
+      env: { ...process.env, PATH: pathEnv, HOME: home }
+    })
+
+    let stdout = ''
+    let stderr = ''
+
+    codebuddyProcess.stdout?.on('data', (data) => { stdout += data.toString() })
+    codebuddyProcess.stderr?.on('data', (data) => { stderr += data.toString() })
+
+    codebuddyProcess.on('close', (code) => {
+      if (code === 0) {
+        resolve({ success: true, output: stdout.trim() })
+      } else {
+        resolve({ success: false, error: stderr.trim() || stdout.trim() || `Exit code ${code}` })
+      }
+    })
+
+    codebuddyProcess.on('error', (err) => {
+      resolve({ success: false, error: err.message })
+    })
+  })
+}
+
+// Check if user is logged in (returns user info if cached)
+ipcMain.handle('auth:check-login', () => {
+  const userInfo = configStore.getUserInfo()
+  return { isLoggedIn: configStore.isLoggedIn(), userInfo }
+})
+
+// Get current user info
+ipcMain.handle('auth:get-user', () => {
+  return configStore.getUserInfo()
+})
+
+// Initiate login flow via SDK (opens browser automatically)
+// This handler is used by SettingsView and other places that call 'auth:login'
+ipcMain.handle('auth:login', async () => {
+  // Use SDK authentication instead of CLI
+  return await performSDKAuthentication('ioa')
+})
+
+// Logout
+ipcMain.handle('auth:logout', async () => {
+  console.log('[Main] Logging out...')
+  
+  // Try to logout via CLI
+  try {
+    await executeCodeBuddyAuthCommand(['logout'])
+  } catch (e) {
+    console.warn('[Main] CLI logout failed:', e)
+  }
+  
+  configStore.logout()
+  broadcastUserChange(null)
+  return { success: true }
+})
+
+// SDK-based authentication with external browser
+// Supports multiple environments: 'external', 'internal', 'ioa', 'cloudhosted'
+ipcMain.handle('auth:sdk-login', async (_, environment: AuthEnvironment = 'ioa') => {
+  // Delegate to the reusable authentication function
+  return await performSDKAuthentication(environment)
+})
+
+// SDK-based authentication with custom endpoint (self-hosted)
+// Example: auth:sdk-login-endpoint with 'https://my-corp.codebuddy.com'
+ipcMain.handle('auth:sdk-login-endpoint', async (_, endpoint: string) => {
+  logger.info('SDK login with custom endpoint requested', { endpoint })
+  
+  if (!endpoint || !endpoint.startsWith('http')) {
+    return { success: false, error: '请提供有效的端点 URL' }
+  }
+  
+  // Delegate to the reusable authentication function with custom endpoint
+  return await performSDKAuthentication('external', endpoint)
+})
+
 // MCP Configuration Handlers
-const mcpConfigPath = path.join(os.homedir(), '.opencowork', 'mcp.json');
+const mcpConfigPath = path.join(os.homedir(), '.codebuddy', 'mcp.json');
 
 ipcMain.handle('mcp:get-config', async () => {
   try {
@@ -666,7 +1534,7 @@ ipcMain.handle('mcp:save-config', async (_, content: string) => {
 });
 
 // Skills Management Handlers
-const skillsDir = path.join(os.homedir(), '.opencowork', 'skills');
+const skillsDir = path.join(os.homedir(), '.codebuddy', 'skills');
 
 // Helper to get built-in skill names
 const getBuiltinSkillNames = () => {
@@ -769,6 +1637,199 @@ ipcMain.handle('skills:delete', async (_, skillId: string) => {
     return { success: false, error: (e as Error).message };
   }
 });
+
+ipcMain.handle('skills:import-official', async () => {
+  const SKILLS_ZIP_URL = 'https://cnb.cool/codebuddy/codebuddy/-/git/raw/master/skills/skills.zip?download=true'
+  const codebuddyDir = path.join(os.homedir(), '.codebuddy')
+  const targetSkillsPath = path.join(codebuddyDir, 'skills')
+  
+  try {
+    logger.info('Starting official skills import', { targetPath: targetSkillsPath })
+    
+    // Ensure .codebuddy directory exists
+    if (!fs.existsSync(codebuddyDir)) {
+      fs.mkdirSync(codebuddyDir, { recursive: true })
+    }
+    
+    // Check if skills directory exists
+    let skillsDirExists = false
+    try {
+      await fs.promises.access(targetSkillsPath)
+      skillsDirExists = true
+    } catch {
+      // Directory doesn't exist, continue
+    }
+    
+    // Download ZIP file
+    logger.info('Downloading skills zip from', { url: SKILLS_ZIP_URL })
+    
+    const zipBuffer = await new Promise<Buffer>((resolve, reject) => {
+      https.get(SKILLS_ZIP_URL, (response) => {
+        if (response.statusCode !== 200) {
+          reject(new Error(`Failed to download: ${response.statusCode} ${response.statusMessage}`))
+          return
+        }
+        
+        const chunks: Buffer[] = []
+        response.on('data', (chunk: Buffer) => {
+          chunks.push(chunk)
+        })
+        response.on('end', () => {
+          resolve(Buffer.concat(chunks))
+        })
+        response.on('error', (err) => {
+          reject(err)
+        })
+      }).on('error', (err) => {
+        reject(err)
+      })
+    })
+    
+    logger.info('ZIP file downloaded', { size: zipBuffer.length })
+    
+    // Extract ZIP file
+    const zip = new AdmZip(zipBuffer)
+    const zipEntries = zip.getEntries()
+    
+    // Create skills directory if it doesn't exist
+    if (!skillsDirExists) {
+      await fs.promises.mkdir(targetSkillsPath, { recursive: true })
+    }
+    
+    // Get list of existing skill directories before extraction
+    const existingSkillsBefore = new Set<string>()
+    try {
+      const dirs = await fs.promises.readdir(targetSkillsPath)
+      for (const dir of dirs) {
+        const dirPath = path.join(targetSkillsPath, dir)
+        const stat = await fs.promises.stat(dirPath)
+        if (stat.isDirectory()) {
+          existingSkillsBefore.add(dir)
+        }
+      }
+    } catch {
+      // Directory might be empty, that's fine
+    }
+    
+    // Extract files, checking for existing directories with same names
+    for (const entry of zipEntries) {
+      // Skip __MACOSX and ._ files
+      if (entry.entryName.startsWith('__MACOSX') || entry.entryName.includes('/._')) {
+        continue
+      }
+      
+      // Remove 'skills/' prefix if exists
+      let relativePath = entry.entryName
+      if (relativePath.startsWith('skills/')) {
+        relativePath = relativePath.substring(7)
+      }
+      
+      if (!relativePath) continue
+      
+      const targetPath = path.join(targetSkillsPath, relativePath)
+      
+      // If it's a directory
+      if (entry.isDirectory) {
+        const dirName = path.basename(targetPath)
+        const parentDir = path.dirname(targetPath)
+        
+        // Check if parent directory has a directory with the same name
+        try {
+          const parentItems = await fs.promises.readdir(parentDir)
+          if (parentItems.includes(dirName)) {
+            const existingPath = path.join(parentDir, dirName)
+            const stat = await fs.promises.stat(existingPath)
+            if (stat.isDirectory()) {
+              logger.info('Skipping existing directory', { path: existingPath })
+              continue
+            }
+          }
+        } catch {
+          // Parent directory doesn't exist, continue creating
+        }
+        
+        // Create directory
+        await fs.promises.mkdir(targetPath, { recursive: true })
+      } else {
+        // If it's a file, check if parent directory has a directory with the same name
+        const fileName = path.basename(targetPath)
+        const parentDir = path.dirname(targetPath)
+        
+        try {
+          const parentItems = await fs.promises.readdir(parentDir)
+          if (parentItems.includes(fileName)) {
+            const existingPath = path.join(parentDir, fileName)
+            const stat = await fs.promises.stat(existingPath)
+            if (stat.isDirectory()) {
+              // Directory exists with same name, skip file
+              logger.info('Skipping file, directory exists with same name', { path: existingPath })
+              continue
+            }
+          }
+        } catch {
+          // Parent directory doesn't exist, create it
+          await fs.promises.mkdir(parentDir, { recursive: true })
+        }
+        
+        // Extract file content
+        const content = entry.getData()
+        await fs.promises.writeFile(targetPath, content)
+      }
+    }
+    
+    // After extraction, count skill directories (top-level directories in targetSkillsPath)
+    let extractedCount = 0
+    let skippedCount = 0
+    
+    try {
+      const existingSkillsAfter = new Set<string>()
+      const dirs = await fs.promises.readdir(targetSkillsPath)
+      for (const dir of dirs) {
+        const dirPath = path.join(targetSkillsPath, dir)
+        const stat = await fs.promises.stat(dirPath)
+        if (stat.isDirectory()) {
+          existingSkillsAfter.add(dir)
+        }
+      }
+      
+      // Compare with before: new directories = extracted, existing = skipped
+      for (const skillDir of existingSkillsAfter) {
+        if (existingSkillsBefore.has(skillDir)) {
+          skippedCount++
+        } else {
+          extractedCount++
+        }
+      }
+    } catch (error) {
+      logger.warn('Could not count skill directories after extraction', { error: (error as Error).message })
+      // Fallback: if we can't count properly, return 0 to avoid misleading numbers
+      extractedCount = 0
+      skippedCount = 0
+    }
+    
+    logger.info('Skills imported successfully', {
+      targetPath: targetSkillsPath,
+      extractedSkillsCount: extractedCount,
+      skippedSkillsCount: skippedCount
+    })
+    
+    return {
+      success: true,
+      message: `成功导入 ${extractedCount} 个技能${skippedCount > 0 ? `，跳过 ${skippedCount} 个已存在技能` : ''}`,
+      extractedCount,
+      skippedCount
+    }
+  } catch (error) {
+    logger.error('Failed to import official skills', {
+      error: (error as Error).message,
+      stack: (error as Error).stack
+    })
+    return {
+      success: false,
+      error: (error as Error).message
+    }
+  }
+})
 
 // Plugin Marketplace Handlers
 /**

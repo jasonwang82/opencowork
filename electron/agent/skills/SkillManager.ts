@@ -16,7 +16,7 @@ export class SkillManager {
     private skills: Map<string, SkillDefinition> = new Map();
 
     constructor() {
-        this.skillsDir = path.join(os.homedir(), '.opencowork', 'skills');
+        this.skillsDir = path.join(os.homedir(), '.codebuddy', 'skills');
     }
 
     async initializeDefaults() {

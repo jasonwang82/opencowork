@@ -20,6 +20,47 @@ interface MarkdownRendererProps {
     isDark?: boolean;
 }
 
+// Helper to detect and make file paths clickable in text
+function renderWithClickablePaths(children: React.ReactNode): React.ReactNode {
+    if (!children) return children;
+    
+    // If it's an array, process each child
+    if (Array.isArray(children)) {
+        return children.map((child, idx) => (
+            <span key={idx}>{renderWithClickablePaths(child)}</span>
+        ));
+    }
+    
+    // Only process strings
+    if (typeof children !== 'string') {
+        return children;
+    }
+    
+    // Regex to detect Unix paths like /Users/xxx/... or /home/xxx/...
+    const pathRegex = /(\/(?:Users|home|var|tmp|opt|usr|etc|Volumes)[^\s,;:'"<>|]+)/g;
+    
+    const parts = children.split(pathRegex);
+    if (parts.length === 1) {
+        return children; // No paths found
+    }
+    
+    return parts.map((part, idx) => {
+        if (pathRegex.test(part) || part.match(/^\/(?:Users|home|var|tmp|opt|usr|etc|Volumes)/)) {
+            return (
+                <button
+                    key={idx}
+                    onClick={() => window.ipcRenderer.invoke('shell:open-path', part)}
+                    className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded border border-blue-200 hover:bg-blue-100 cursor-pointer text-sm font-mono transition-colors"
+                    title="点击在文件管理器中打开"
+                >
+                    📁 {part}
+                </button>
+            );
+        }
+        return part;
+    });
+}
+
 export function MarkdownRenderer({ content, className = '', isDark = false }: MarkdownRendererProps) {
     return (
         <div className={`prose ${isDark ? 'prose-invert' : 'prose-stone'} max-w-none ${className}`}>
@@ -107,9 +148,9 @@ export function MarkdownRenderer({ content, className = '', isDark = false }: Ma
                     td({ children }) {
                         return <td className="px-4 py-3 border-b border-stone-100 text-stone-600">{children}</td>;
                     },
-                    // Improved Spacing for Typography
+                    // Improved Spacing for Typography with clickable paths
                     p({ children }) {
-                        return <p className="mb-4 leading-7 text-stone-700 last:mb-0">{children}</p>;
+                        return <p className="mb-4 leading-7 text-stone-700 last:mb-0">{renderWithClickablePaths(children)}</p>;
                     },
                     ul({ children }) {
                         return <ul className="list-disc pl-6 mb-4 space-y-1 text-stone-700 marker:text-stone-400">{children}</ul>;

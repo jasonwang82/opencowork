@@ -23,13 +23,13 @@ const accentColors: Record<AccentColor, { primary: string; ring: string }> = {
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
     const [mode, setMode] = useState<ThemeMode>(() => {
-        const saved = localStorage.getItem('opencowork-theme');
+        const saved = localStorage.getItem('workbuddy-theme');
         if (saved === 'light' || saved === 'dark' || saved === 'system') return saved;
         return 'system';
     });
 
     const [accentColor, setAccentColor] = useState<AccentColor>(() => {
-        const saved = localStorage.getItem('opencowork-accent');
+        const saved = localStorage.getItem('workbuddy-accent');
         if (['blue', 'purple', 'green', 'orange', 'pink'].includes(saved || '')) {
             return saved as AccentColor;
         }
@@ -39,7 +39,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     const [isDark, setIsDark] = useState(false);
 
     useEffect(() => {
-        localStorage.setItem('opencowork-theme', mode);
+        localStorage.setItem('workbuddy-theme', mode);
 
         const updateDark = () => {
             let dark = false;
@@ -59,7 +59,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     }, [mode]);
 
     useEffect(() => {
-        localStorage.setItem('opencowork-accent', accentColor);
+        localStorage.setItem('workbuddy-accent', accentColor);
         const colors = accentColors[accentColor];
         document.documentElement.style.setProperty('--primary', colors.primary);
         document.documentElement.style.setProperty('--ring', colors.ring);

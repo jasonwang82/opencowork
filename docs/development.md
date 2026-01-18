@@ -1,6 +1,6 @@
 # Development Guide
 
-Welcome to OpenCowork development! This guide will help you set up your local environment and contribute to the project.
+Welcome to WorkBuddy development! This guide will help you set up your local environment and contribute to the project.
 
 ## Prerequisites
 
@@ -16,8 +16,8 @@ Before you begin, please ensure your development environment meets the following
 First, clone the project code to your local machine:
 
 ```bash
-git clone https://github.com/Safphere/opencowork.git
-cd opencowork
+git clone https://github.com/Safphere/workbuddy.git
+cd workbuddy
 ```
 
 ### 2. Install Dependencies
@@ -54,7 +54,7 @@ This project uses **GitHub Actions** for automated builds, which is our recommen
     -   **Windows**: `.exe` (NSIS installer)
     -   **macOS**: `.dmg` and `.zip`
     -   **Linux**: `.AppImage`
-4.  Once completed, artifacts will be published to the project's [Releases](https://github.com/Safphere/opencowork/releases) page.
+4.  Once completed, artifacts will be published to the project's [Releases](https://github.com/Safphere/workbuddy/releases) page.
 
 ### Manual Build
 

@@ -1,6 +1,6 @@
 # 开发指南
 
-欢迎参与 OpenCowork 的开发！我们将指导您如何在本地搭建开发环境并参与贡献。
+欢迎参与 WorkBuddy 的开发！我们将指导您如何在本地搭建开发环境并参与贡献。
 
 ## 前置要求
 
@@ -16,8 +16,8 @@
 首先，将项目代码克隆到本地：
 
 ```bash
-git clone https://github.com/Safphere/opencowork.git
-cd opencowork
+git clone https://github.com/Safphere/workbuddy.git
+cd workbuddy
 ```
 
 ### 2. 安装依赖
@@ -54,7 +54,7 @@ npm run dev
     -   **Windows**: `.exe` (NSIS 安装包)
     -   **macOS**: `.dmg` 和 `.zip`
     -   **Linux**: `.AppImage`
-4.  构建完成后，产物将自动发布到项目的 [Releases](https://github.com/Safphere/opencowork/releases) 页面。
+4.  构建完成后，产物将自动发布到项目的 [Releases](https://github.com/Safphere/workbuddy/releases) 页面。
 
 ### 手动构建
 

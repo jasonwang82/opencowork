@@ -33,6 +33,7 @@ interface CLIStreamMessage {
     is_error?: boolean;
     error_message?: string;
     error?: string;
+    errors?: string[];  // CLI may return an array of errors
 }
 
 /**
@@ -255,9 +256,9 @@ export class CLIAgentRuntime {
                 userContent = input;
             } else {
                 userContent = input.content;
-                // Note: CLI mode does not support images
+                // Note: CLI mode does not support images - suggest switching to SDK mode
                 if (input.images && input.images.length > 0) {
-                    const errorMsg = 'Image input is not supported in CodeBuddy CLI mode.';
+                    const errorMsg = '图片识别功能暂不支持 CLI 模式。';
                     this.broadcast('agent:error', errorMsg);
                     throw new Error(errorMsg);
                 }
@@ -298,6 +299,9 @@ export class CLIAgentRuntime {
     }
 
     private async executeCodeBuddy(userMessage: string) {
+        // Broadcast stream start to clear previous progress
+        this.broadcast('agent:stream-start', {});
+        
         // Find a compatible Node.js version
         const nodeResult = this.findCompatibleNodePath();
         if (nodeResult.error) {
@@ -503,7 +507,10 @@ export class CLIAgentRuntime {
                             if (msg.type === 'result') {
                                 if (msg.is_error) {
                                     hasError = true;
-                                    errorMessage = msg.error_message || msg.error || msg.result || 'Unknown error';
+                                    // Extract error from various possible fields
+                                    errorMessage = msg.error_message || msg.error || 
+                                        (msg.errors && msg.errors.length > 0 ? msg.errors.join('; ') : null) || 
+                                        msg.result || 'Unknown error';
                                     console.error('[CLIAgentRuntime] Error in result:', errorMessage);
                                     logger.error('CLI result error', { 
                                         error: errorMessage,
@@ -572,7 +579,10 @@ export class CLIAgentRuntime {
                             if (msg.type === 'result') {
                                 if (msg.is_error) {
                                     hasError = true;
-                                    errorMessage = msg.error_message || msg.error || msg.result || 'Unknown error';
+                                    // Extract error from various possible fields
+                                    errorMessage = msg.error_message || msg.error || 
+                                        (msg.errors && msg.errors.length > 0 ? msg.errors.join('; ') : null) || 
+                                        msg.result || 'Unknown error';
                                 } else if (msg.result) {
                                     finalResult = msg.result;
                                 }
@@ -603,10 +613,13 @@ export class CLIAgentRuntime {
                         finalContent = `⚠️ ${stderrBuffer}`;
                         console.log('[CLIAgentRuntime] Using stderr as content');
                     } else {
-                        // Fallback
-                        finalContent = code === 0 
-                            ? '命令执行完成，但没有返回内容。'
-                            : `命令执行失败，退出码: ${code}`;
+                        // Fallback - handle null exit code (e.g., process killed by signal)
+                        if (code === 0 || code === null) {
+                            // Success - no need to show message
+                            finalContent = '';
+                        } else {
+                            finalContent = `命令执行失败，退出码: ${code}`;
+                        }
                         console.log('[CLIAgentRuntime] Using fallback content');
                     }
 
@@ -633,7 +646,8 @@ export class CLIAgentRuntime {
                     assistantMessage.content = finalContent;
                     this.notifyUpdate();
                     
-                    if (code === 0 && !hasError) {
+                    // null exit code means killed by signal - treat as success if no error
+                    if ((code === 0 || code === null) && !hasError) {
                         resolve();
                     } else {
                         this.broadcast('agent:error', finalContent);
@@ -724,7 +738,7 @@ export class CLIAgentRuntime {
                 // System initialization - broadcast start
                 this.broadcast('agent:cli-progress', {
                     type: 'init',
-                    message: '正在初始化...',
+                    message: '思考中...',
                     model: (msg as unknown as { model?: string }).model
                 });
             } else if (msg.type === 'assistant' && msg.message?.content) {
@@ -736,18 +750,25 @@ export class CLIAgentRuntime {
                         const input = block.input || {};
                         
                         let progressMessage = '';
+                        let filePath: string | undefined;
+                        let isArtifact = false;
+                        
                         switch (toolName) {
                             case 'Bash':
                                 progressMessage = `执行命令: ${(input as { command?: string }).command || ''}`;
                                 break;
                             case 'Read':
-                                progressMessage = `读取文件: ${(input as { file_path?: string }).file_path || ''}`;
+                                filePath = (input as { file_path?: string }).file_path;
+                                progressMessage = `读取文件: ${filePath || ''}`;
                                 break;
                             case 'Write':
-                                progressMessage = `写入文件: ${(input as { file_path?: string }).file_path || ''}`;
+                                filePath = (input as { file_path?: string }).file_path;
+                                progressMessage = `写入文件: ${filePath || ''}`;
+                                isArtifact = true;
                                 break;
                             case 'Edit':
-                                progressMessage = `编辑文件: ${(input as { file_path?: string }).file_path || ''}`;
+                                filePath = (input as { file_path?: string }).file_path;
+                                progressMessage = `编辑文件: ${filePath || ''}`;
                                 break;
                             case 'Glob':
                                 progressMessage = `搜索文件: ${(input as { pattern?: string }).pattern || ''}`;
@@ -764,46 +785,89 @@ export class CLIAgentRuntime {
                             case 'Task':
                                 progressMessage = `启动任务: ${(input as { description?: string }).description || ''}`;
                                 break;
-                            case 'TodoWrite':
-                                progressMessage = '更新任务列表';
+                            case 'TodoWrite': {
+                                // TodoWrite input can have 'todos' or 'newTodos' depending on SDK version
+                                const inputData = input as { 
+                                    todos?: Array<{content: string; status: string; id?: string}>;
+                                    newTodos?: Array<{content: string; status: string; id?: string}>;
+                                };
+                                const todoItems = inputData.todos || inputData.newTodos || [];
+                                console.log('[CLIAgentRuntime] TodoWrite input:', JSON.stringify(input).substring(0, 500));
+                                console.log('[CLIAgentRuntime] TodoWrite items:', todoItems.length);
+                                
+                                progressMessage = `任务列表 (${todoItems.length}项)`;
+                                // Broadcast with todos data
+                                this.broadcast('agent:cli-progress', {
+                                    type: 'tool_use',
+                                    tool: toolName,
+                                    message: progressMessage,
+                                    input: input,
+                                    todos: todoItems.map(t => ({
+                                        content: t.content,
+                                        status: t.status as 'in_progress' | 'pending' | 'completed'
+                                    }))
+                                });
+                                break;
+                            }
+                            case 'Skill':
+                                progressMessage = `启动技能: ${(input as { command?: string }).command || ''}`;
                                 break;
                             default:
-                                progressMessage = `调用工具: ${toolName}`;
+                                // Handle MCP tools (start with mcp__)
+                                if (toolName.startsWith('mcp__')) {
+                                    const mcpParts = toolName.split('__');
+                                    const serverName = mcpParts[1] || 'unknown';
+                                    const toolFn = mcpParts[2] || toolName;
+                                    progressMessage = `MCP ${serverName}: ${toolFn}`;
+                                } else {
+                                    progressMessage = `调用工具: ${toolName}`;
+                                }
                         }
                         
-                        this.broadcast('agent:cli-progress', {
-                            type: 'tool_use',
-                            tool: toolName,
-                            message: progressMessage,
-                            input: input
-                        });
+                        // Broadcast tool use progress (skip for TodoWrite as it's handled above)
+                        if (toolName !== 'TodoWrite') {
+                            this.broadcast('agent:cli-progress', {
+                                type: 'tool_use',
+                                tool: toolName,
+                                message: progressMessage,
+                                input: input,
+                                filePath: filePath,
+                                isArtifact: isArtifact
+                            });
+                        }
                     } else if (block.type === 'text' && block.text) {
-                        // Text content - stream to UI
-                        this.broadcast('agent:stream-token', block.text);
+                        // Skip intermediate progress messages (short messages ending with colon)
+                        const trimmedText = block.text.trim();
+                        const isProgressMessage = trimmedText.length < 150 && 
+                            (trimmedText.endsWith('：') || trimmedText.endsWith(':')) &&
+                            !trimmedText.includes('\n');
+                        
+                        if (!isProgressMessage) {
+                            // Text content - stream to UI
+                            this.broadcast('agent:stream-token', block.text);
+                        } else {
+                            console.log('[CLIAgentRuntime] Skipping progress message:', trimmedText.substring(0, 50));
+                        }
                     }
                 }
             } else if (msg.type === 'user' && msg.message?.content) {
-                // Tool result - could show completion
-                for (const block of msg.message.content) {
-                    if (block.type === 'tool_result' && block.tool_use_id) {
-                        this.broadcast('agent:cli-progress', {
-                            type: 'tool_result',
-                            message: '工具执行完成'
-                        });
-                    }
-                }
+                // Tool result received - no need to broadcast "工具执行完成"
+                console.log('[CLIAgentRuntime] Tool result received');
             } else if (msg.type === 'result') {
-                // Final result
-                const errorMsg = msg.error_message || msg.error || msg.result;
-                this.broadcast('agent:cli-progress', {
-                    type: 'complete',
-                    message: msg.is_error ? `错误: ${errorMsg}` : '执行完成',
-                    is_error: msg.is_error
-                });
-                
-                // If there's an error, also stream it to the UI
-                if (msg.is_error && errorMsg) {
-                    this.broadcast('agent:stream-token', `\n\n❌ 错误: ${errorMsg}`);
+                // Final result - only broadcast if there's an error
+                if (msg.is_error) {
+                    const errorMsg = msg.error_message || msg.error || 
+                        (msg.errors && msg.errors.length > 0 ? msg.errors.join('; ') : null) || 
+                        msg.result;
+                    this.broadcast('agent:cli-progress', {
+                        type: 'complete',
+                        message: `错误: ${errorMsg}`,
+                        is_error: true
+                    });
+                    // Also stream error to the UI
+                    if (errorMsg) {
+                        this.broadcast('agent:stream-token', `\n\n❌ 错误: ${errorMsg}`);
+                    }
                 }
             }
         } catch (err) {
@@ -812,22 +876,25 @@ export class CLIAgentRuntime {
     }
 
     private broadcast(channel: string, data: unknown) {
-        try {
-            // Filter out destroyed windows first
-            this.windows = this.windows.filter(win => !win.isDestroyed());
-            
-            for (const win of this.windows) {
-                try {
-                    if (!win.isDestroyed() && win.webContents && !win.webContents.isDestroyed()) {
-                        win.webContents.send(channel, data);
+        // Use setImmediate to avoid blocking the main process
+        setImmediate(() => {
+            try {
+                // Filter out destroyed windows first
+                this.windows = this.windows.filter(win => !win.isDestroyed());
+                
+                for (const win of this.windows) {
+                    try {
+                        if (!win.isDestroyed() && win.webContents && !win.webContents.isDestroyed()) {
+                            win.webContents.send(channel, data);
+                        }
+                    } catch (err) {
+                        console.error('[CLIAgentRuntime] Error sending to window:', err);
                     }
-                } catch (err) {
-                    console.error('[CLIAgentRuntime] Error sending to window:', err);
                 }
+            } catch (err) {
+                console.error('[CLIAgentRuntime] Error broadcasting:', err);
             }
-        } catch (err) {
-            console.error('[CLIAgentRuntime] Error broadcasting:', err);
-        }
+        });
     }
 
     private notifyUpdate() {

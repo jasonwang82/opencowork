@@ -1,11 +1,14 @@
 import { useState, useEffect, useCallback } from 'react';
-import { X, Settings, FolderOpen, Server, Check, Plus, Trash2, Edit2, Zap, Eye, FileText, Download, RefreshCw, Package, Loader2 } from 'lucide-react';
+import { X, Settings, FolderOpen, Server, Check, Plus, Trash2, Edit2, Zap, Eye, FileText, Download, RefreshCw, Package, Loader2, LogOut, LogIn, User } from 'lucide-react';
 import { SkillEditor } from './SkillEditor';
 import { useI18n } from '../i18n/useI18n';
 import type { IntegrationMode } from '../../electron/config/ConfigStore';
+import type { UserInfo } from '../App';
 
 interface SettingsViewProps {
     onClose: () => void;
+    userInfo?: UserInfo | null;
+    onUserInfoChange?: (userInfo: UserInfo | null) => void;
 }
 
 interface Config {
@@ -33,8 +36,8 @@ interface ToolPermission {
     grantedAt: number;
 }
 
-export function SettingsView({ onClose }: SettingsViewProps) {
-    const { t } = useI18n();
+export function SettingsView({ onClose, userInfo, onUserInfoChange }: SettingsViewProps) {
+    useI18n(); // Hook for i18n context
     const [config, setConfig] = useState<Config>({
         apiKey: '',
         apiUrl: 'https://api.minimaxi.com/anthropic',
@@ -42,13 +45,17 @@ export function SettingsView({ onClose }: SettingsViewProps) {
         authorizedFolders: [],
         networkAccess: false,
         shortcut: 'Alt+Space',
-        integrationMode: 'api',
+        integrationMode: 'sdk-codebuddy',  // Default to SDK mode
         codeBuddyApiKey: '',
         codeBuddyInternetEnv: 'ioa'
     });
     const [saved, setSaved] = useState(false);
     const [activeTab, setActiveTab] = useState<'api' | 'folders' | 'mcp' | 'skills' | 'plugins' | 'advanced' | 'logs'>('api');
     const [isRecordingShortcut, setIsRecordingShortcut] = useState(false);
+    const [isLoggingIn, setIsLoggingIn] = useState(false);
+    const [isLoginPending, setIsLoginPending] = useState(false);
+    const [isLoggingOut, setIsLoggingOut] = useState(false);
+    const [loginError, setLoginError] = useState<string | null>(null);
 
     // Plugins State
     const [pluginSource, setPluginSource] = useState('');
@@ -82,6 +89,8 @@ export function SettingsView({ onClose }: SettingsViewProps) {
     const [editingSkill, setEditingSkill] = useState<string | null>(null);
     const [viewingSkill, setViewingSkill] = useState<boolean>(false); // New state for read-only mode
     const [showSkillEditor, setShowSkillEditor] = useState(false);
+    const [isImportingSkills, setIsImportingSkills] = useState(false);
+    const [importSkillsStatus, setImportSkillsStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
     // Permissions State
     const [permissions, setPermissions] = useState<ToolPermission[]>([]);
@@ -89,10 +98,6 @@ export function SettingsView({ onClose }: SettingsViewProps) {
     // Command Blacklist State
     const [blacklist, setBlacklist] = useState<string[]>([]);
     const [newBlacklistCommand, setNewBlacklistCommand] = useState('');
-
-    // CodeBuddy Install State
-    const [isInstalling, setIsInstalling] = useState(false);
-    const [installStatus, setInstallStatus] = useState<string | null>(null);
 
     const loadPermissions = () => {
         window.ipcRenderer.invoke('permissions:list').then(list => setPermissions(list as ToolPermission[]));
@@ -167,6 +172,29 @@ export function SettingsView({ onClose }: SettingsViewProps) {
         });
     }, []);
 
+    // Listen for login pending state (waiting for browser authentication)
+    useEffect(() => {
+        const removeLoginPendingListener = window.ipcRenderer.on('auth:login-pending', () => {
+            setIsLoginPending(true);
+        });
+
+        const removeUserChangedListener = window.ipcRenderer.on('auth:user-changed', (_event, ...args) => {
+            const newUserInfo = args[0] as UserInfo | null;
+            onUserInfoChange?.(newUserInfo);
+            setIsLoginPending(false);
+        });
+
+        const removeLoginFailedListener = window.ipcRenderer.on('auth:login-failed', () => {
+            setIsLoginPending(false);
+        });
+
+        return () => {
+            removeLoginPendingListener?.();
+            removeUserChangedListener?.();
+            removeLoginFailedListener?.();
+        };
+    }, [onUserInfoChange]);
+
     const loadPluginMarketplaces = useCallback(async () => {
         try {
             const result = await window.ipcRenderer.invoke('plugin:marketplace-list') as { success: boolean; marketplaces?: string; error?: string };
@@ -225,6 +253,42 @@ export function SettingsView({ onClose }: SettingsViewProps) {
 
     const refreshSkills = () => {
         window.ipcRenderer.invoke('skills:list').then(list => setSkills(list as SkillInfo[]));
+    };
+
+    const handleImportSkills = async () => {
+        setIsImportingSkills(true);
+        setImportSkillsStatus(null);
+
+        try {
+            const result = await window.ipcRenderer.invoke('skills:import-official') as {
+                success: boolean;
+                message?: string;
+                error?: string;
+                extractedCount?: number;
+                skippedCount?: number;
+            };
+
+            if (result.success) {
+                setImportSkillsStatus({
+                    type: 'success',
+                    message: result.message || `成功导入 ${result.extractedCount || 0} 个技能${result.skippedCount ? `，跳过 ${result.skippedCount} 个已存在项` : ''}`
+                });
+                // Refresh skills list
+                refreshSkills();
+            } else {
+                setImportSkillsStatus({
+                    type: 'error',
+                    message: result.error || '导入失败'
+                });
+            }
+        } catch (e) {
+            setImportSkillsStatus({
+                type: 'error',
+                message: `导入失败: ${(e as Error).message}`
+            });
+        } finally {
+            setIsImportingSkills(false);
+        }
     };
 
     const handleSave = async () => {
@@ -372,163 +436,117 @@ export function SettingsView({ onClose }: SettingsViewProps) {
                     <div className="p-5 space-y-5">
                         {activeTab === 'api' && (
                             <>
-                                <div>
-                                    <label className="block text-xs font-medium text-stone-500 mb-1.5">{t('integrationMode')}</label>
-                                    <select
-                                        value={config.integrationMode}
-                                        onChange={(e) => setConfig({ ...config, integrationMode: e.target.value as 'api' | 'cli-codebuddy' | 'sdk-codebuddy' })}
-                                        className="w-full bg-white border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500"
-                                    >
-                                        <option value="api">{t('apiMode')}</option>
-                                        <option value="sdk-codebuddy">{t('sdkMode')}</option>
-                                        <option value="cli-codebuddy">{t('cliMode')}</option>
-                                    </select>
-                                    <p className="text-xs text-stone-400 mt-1">
-                                        {config.integrationMode === 'api' 
-                                            ? t('apiModeDescription')
-                                            : config.integrationMode === 'sdk-codebuddy'
-                                            ? t('sdkModeDescription')
-                                            : t('cliModeDescription')}
-                                    </p>
-                                </div>
-                                {config.integrationMode === 'api' && (
-                                    <>
-                                        <div>
-                                            <label className="block text-xs font-medium text-stone-500 mb-1.5">API Key</label>
-                                            <input
-                                                type="password"
-                                                value={config.apiKey}
-                                                onChange={(e) => setConfig({ ...config, apiKey: e.target.value })}
-                                                placeholder="sk-..."
-                                                className="w-full bg-white border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500"
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="block text-xs font-medium text-stone-500 mb-1.5">API URL</label>
-                                            <input
-                                                type="text"
-                                                value={config.apiUrl}
-                                                onChange={(e) => setConfig({ ...config, apiUrl: e.target.value })}
-                                                placeholder="https://api.anthropic.com"
-                                                className="w-full bg-white border border-stone-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500"
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="block text-xs font-medium text-stone-500 mb-1.5">{t('modelName')}</label>
-                                            <input
-                                                type="text"
-                                                value={config.model}
-                                                onChange={(e) => setConfig({ ...config, model: e.target.value })}
-                                                placeholder="glm-4.7"
-                                                className="w-full bg-white border border-stone-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500"
-                                            />
-                                            <p className="text-xs text-stone-400 mt-1">{t('modelNameDescription')}</p>
-                                        </div>
-                                    </>
-                                )}
-                                {config.integrationMode === 'cli-codebuddy' && (
-                                    <>
-                                        <div>
-                                            <label className="block text-xs font-medium text-stone-500 mb-1.5">{t('codeBuddyApiKey')}</label>
-                                            <input
-                                                type="password"
-                                                value={config.codeBuddyApiKey}
-                                                onChange={(e) => setConfig({ ...config, codeBuddyApiKey: e.target.value })}
-                                                placeholder={t('codeBuddyApiKeyPlaceholder')}
-                                                className="w-full bg-white border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500"
-                                            />
-                                            <p className="text-xs text-stone-400 mt-1">{t('codeBuddyApiKeyHint')}</p>
-                                        </div>
-                                        <div>
-                                            <label className="block text-xs font-medium text-stone-500 mb-1.5">{t('codeBuddyInternetEnv')}</label>
-                                            <select
-                                                value={config.codeBuddyInternetEnv}
-                                                onChange={(e) => setConfig({ ...config, codeBuddyInternetEnv: e.target.value })}
-                                                className="w-full bg-white border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500"
-                                            >
-                                                <option value="ioa">ioa (内网)</option>
-                                                <option value="public">public (外网)</option>
-                                            </select>
-                                            <p className="text-xs text-stone-400 mt-1">{t('codeBuddyInternetEnvHint')}</p>
-                                        </div>
-                                        <div className="bg-amber-50 text-amber-700 rounded-lg p-3 text-xs space-y-2">
-                                            <p className="font-medium">{t('codeBuddyInstructions')}</p>
-                                            <ul className="list-disc list-inside space-y-1">
-                                                <li className="font-mono text-[10px]">{t('codeBuddyInstallRequired')}</li>
-                                                <li>{t('codeBuddyHelp')}</li>
-                                                <li>{t('codeBuddyEnvVars')}</li>
-                                            </ul>
-                                            <div className="mt-3 pt-3 border-t border-amber-200">
+                                {/* Account Section */}
+                                <div className="space-y-4">
+                                    <div>
+                                        <label className="block text-xs font-medium text-stone-500 mb-3">账号</label>
+                                        
+                                        {userInfo ? (
+                                            // Logged in state
+                                            <div className="bg-white border border-stone-200 rounded-lg p-4 space-y-3">
+                                                <div className="flex items-center gap-3">
+                                                    <div className="w-12 h-12 rounded-full bg-brand-100 flex items-center justify-center">
+                                                        <User size={24} className="text-brand-600" />
+                                                    </div>
+                                                    <div className="flex-1">
+                                                        <p className="text-sm font-medium text-stone-800">
+                                                            {userInfo.userNickname}
+                                                        </p>
+                                                        <p className="text-xs text-stone-400">
+                                                            {userInfo.userName}
+                                                            {userInfo.enterprise && ` @ ${userInfo.enterprise}`}
+                                                        </p>
+                                                    </div>
+                                                </div>
                                                 <button
                                                     onClick={async () => {
-                                                        setIsInstalling(true);
-                                                        setInstallStatus(null);
+                                                        setIsLoggingOut(true);
                                                         try {
-                                                            const result = await window.ipcRenderer.invoke('codebuddy:install') as { success: boolean; message?: string };
-                                                            if (result.success) {
-                                                                setInstallStatus('安装成功！');
-                                                            } else {
-                                                                setInstallStatus(result.message || '安装失败');
-                                                            }
+                                                            await window.ipcRenderer.invoke('auth:logout');
+                                                            onUserInfoChange?.(null);
                                                         } catch (err) {
-                                                            setInstallStatus('安装失败：' + (err as Error).message);
+                                                            console.error('Logout failed:', err);
                                                         } finally {
-                                                            setIsInstalling(false);
+                                                            setIsLoggingOut(false);
                                                         }
                                                     }}
-                                                    disabled={isInstalling}
-                                                    className={`w-full px-3 py-2 text-xs font-medium rounded-lg transition-colors ${
-                                                        isInstalling
-                                                            ? 'bg-amber-200 text-amber-600 cursor-not-allowed'
-                                                            : 'bg-brand-500 text-white hover:bg-brand-600'
-                                                    }`}
+                                                    disabled={isLoggingOut}
+                                                    className="w-full flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors disabled:opacity-50"
                                                 >
-                                                    {isInstalling ? '正在安装...' : '一键安装 CodeBuddy'}
+                                                    {isLoggingOut ? (
+                                                        <Loader2 size={16} className="animate-spin" />
+                                                    ) : (
+                                                        <LogOut size={16} />
+                                                    )}
+                                                    {isLoggingOut ? '正在登出...' : '登出'}
                                                 </button>
-                                                {installStatus && (
-                                                    <p className={`mt-2 text-xs ${installStatus.includes('成功') ? 'text-green-600' : 'text-red-600'}`}>
-                                                        {installStatus}
-                                                    </p>
+                                            </div>
+                                        ) : (
+                                            // Not logged in state
+                                            <div className="bg-white border border-stone-200 rounded-lg p-4 space-y-3">
+                                                <div className="flex items-center gap-3">
+                                                    <div className="w-12 h-12 rounded-full bg-stone-100 flex items-center justify-center">
+                                                        <User size={24} className="text-stone-400" />
+                                                    </div>
+                                                    <div className="flex-1">
+                                                        <p className="text-sm font-medium text-stone-600">
+                                                            未登录
+                                                        </p>
+                                                        <p className="text-xs text-stone-400">
+                                                            登录后可使用完整功能
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                                {isLoginPending ? (
+                                                    <div className="w-full flex items-center justify-center gap-2 px-4 py-2 text-sm text-stone-600 bg-stone-50 rounded-lg">
+                                                        <Loader2 size={16} className="animate-spin text-brand-500" />
+                                                        <span>正在登录中，请在浏览器中完成认证...</span>
+                                                    </div>
+                                                ) : (
+                                                    <>
+                                                        <button
+                                                            onClick={async () => {
+                                                                setIsLoggingIn(true);
+                                                                try {
+                                                                    const result = await window.ipcRenderer.invoke('auth:login') as { 
+                                                                        success: boolean; 
+                                                                        userInfo?: UserInfo; 
+                                                                        error?: string 
+                                                                    };
+                                                                    // Note: auth:login will trigger auth:login-pending event
+                                                                    // and then auth:user-changed when complete
+                                                                    // We don't need to set userInfo here as it's handled by listeners
+                                                                    if (!result.success && result.error) {
+                                                                        setIsLoginPending(false);
+                                                                        setLoginError(result.error);
+                                                                    }
+                                                                } catch (err) {
+                                                                    setIsLoginPending(false);
+                                                                    console.error('Login failed:', err);
+                                                                    setLoginError((err as Error).message);
+                                                                } finally {
+                                                                    setIsLoggingIn(false);
+                                                                }
+                                                            }}
+                                                            disabled={isLoggingIn}
+                                                            className="w-full flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-white bg-brand-500 hover:bg-brand-600 rounded-lg transition-colors disabled:opacity-50"
+                                                        >
+                                                            {isLoggingIn ? (
+                                                                <Loader2 size={16} className="animate-spin" />
+                                                            ) : (
+                                                                <LogIn size={16} />
+                                                            )}
+                                                            {isLoggingIn ? '正在启动...' : '登录'}
+                                                        </button>
+                                                        <p className="text-[10px] text-stone-400 text-center">
+                                                            点击登录后将在浏览器中完成认证
+                                                        </p>
+                                                    </>
                                                 )}
                                             </div>
-                                        </div>
-                                    </>
-                                )}
-                                {config.integrationMode === 'sdk-codebuddy' && (
-                                    <>
-                                        <div>
-                                            <label className="block text-xs font-medium text-stone-500 mb-1.5">{t('codeBuddyApiKey')}</label>
-                                            <input
-                                                type="password"
-                                                value={config.codeBuddyApiKey}
-                                                onChange={(e) => setConfig({ ...config, codeBuddyApiKey: e.target.value })}
-                                                placeholder={t('codeBuddyApiKeyPlaceholder')}
-                                                className="w-full bg-white border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500"
-                                            />
-                                            <p className="text-xs text-stone-400 mt-1">{t('codeBuddyApiKeyHint')}</p>
-                                        </div>
-                                        <div>
-                                            <label className="block text-xs font-medium text-stone-500 mb-1.5">{t('codeBuddyInternetEnv')}</label>
-                                            <select
-                                                value={config.codeBuddyInternetEnv}
-                                                onChange={(e) => setConfig({ ...config, codeBuddyInternetEnv: e.target.value })}
-                                                className="w-full bg-white border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500"
-                                            >
-                                                <option value="ioa">ioa (内网)</option>
-                                                <option value="public">public (外网)</option>
-                                            </select>
-                                            <p className="text-xs text-stone-400 mt-1">{t('codeBuddyInternetEnvHint')}</p>
-                                        </div>
-                                        <div className="bg-blue-50 text-blue-700 rounded-lg p-3 text-xs space-y-2">
-                                            <p className="font-medium">{t('sdkModeInstructions')}</p>
-                                            <ul className="list-disc list-inside space-y-1">
-                                                <li>{t('sdkModeEnvVars')}</li>
-                                                <li>{t('sdkModeAutoAuth')}</li>
-                                                <li>{t('sdkModeRecommended')}</li>
-                                            </ul>
-                                        </div>
-                                    </>
-                                )}
+                                        )}
+                                    </div>
+                                </div>
                             </>
                         )}
 
@@ -596,7 +614,7 @@ export function SettingsView({ onClose }: SettingsViewProps) {
                                     spellCheck={false}
                                 />
                                 <p className="text-[10px] text-stone-400 mt-2">
-                                    配置将保存在 ~/.opencowork/mcp.json。请确保 JSON 格式正确。
+                                    配置将保存在 ~/.codebuddy/mcp.json。请确保 JSON 格式正确。
                                 </p>
 
                             </div>
@@ -606,17 +624,46 @@ export function SettingsView({ onClose }: SettingsViewProps) {
                             <div className="space-y-3">
                                 <div className="flex items-center justify-between">
                                     <p className="text-sm text-stone-500">自定义 AI 技能</p>
-                                    <button
-                                        onClick={() => {
-                                            setEditingSkill(null);
-                                            setShowSkillEditor(true);
-                                        }}
-                                        className="flex items-center gap-1 text-xs px-2 py-1 bg-brand-500 text-white rounded hover:bg-brand-600 transition-colors"
-                                    >
-                                        <Plus size={12} />
-                                        新建技能
-                                    </button>
+                                    <div className="flex items-center gap-2">
+                                        <button
+                                            onClick={handleImportSkills}
+                                            disabled={isImportingSkills}
+                                            className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-purple-500 text-white rounded hover:bg-purple-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                        >
+                                            {isImportingSkills ? (
+                                                <>
+                                                    <Loader2 size={12} className="animate-spin" />
+                                                    导入中...
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <Download size={12} />
+                                                    导入常用Skills
+                                                </>
+                                            )}
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                setEditingSkill(null);
+                                                setShowSkillEditor(true);
+                                            }}
+                                            className="flex items-center gap-1 text-xs px-2 py-1 bg-brand-500 text-white rounded hover:bg-brand-600 transition-colors"
+                                        >
+                                            <Plus size={12} />
+                                            新建技能
+                                        </button>
+                                    </div>
                                 </div>
+
+                                {importSkillsStatus && (
+                                    <div className={`p-3 rounded-lg text-sm ${
+                                        importSkillsStatus.type === 'success'
+                                            ? 'bg-green-50 text-green-700 border border-green-200'
+                                            : 'bg-red-50 text-red-700 border border-red-200'
+                                    }`}>
+                                        {importSkillsStatus.message}
+                                    </div>
+                                )}
 
                                 {skills.length === 0 ? (
                                     <div className="text-center py-8 text-stone-400 border-2 border-dashed border-stone-200 rounded-xl">
@@ -1006,6 +1053,35 @@ export function SettingsView({ onClose }: SettingsViewProps) {
                     }}
                     onSave={refreshSkills}
                 />
+            )}
+
+            {/* Login Error Dialog */}
+            {loginError && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+                        <div className="p-6 space-y-4 text-center">
+                            {/* WorkBuddy Icon */}
+                            <div className="flex justify-center">
+                                <div className="w-16 h-16 rounded-2xl bg-white shadow-lg flex items-center justify-center border border-stone-100 overflow-hidden">
+                                    <img src="./logo.png" alt="WorkBuddy" className="w-full h-full object-cover" />
+                                </div>
+                            </div>
+                            
+                            {/* Message */}
+                            <p className="text-stone-800 text-base">
+                                登录失败: {loginError}
+                            </p>
+
+                            {/* Button */}
+                            <button
+                                onClick={() => setLoginError(null)}
+                                className="w-full px-4 py-2.5 bg-brand-500 text-white rounded-lg hover:bg-brand-600 transition-colors font-medium"
+                            >
+                                OK
+                            </button>
+                        </div>
+                    </div>
+                </div>
             )}
         </div>
     );

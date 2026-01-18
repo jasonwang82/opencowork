@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="./public/icon.png" width="100" height="100" alt="OpenCowork Logo">
+  <img src="./public/icon.png" width="100" height="100" alt="WorkBuddy Logo">
 </p>
 
-<h1 align="center">OpenCowork</h1>
+<h1 align="center">WorkBuddy</h1>
 
 <p align="center">
   Open Source Desktop AI Assistant
@@ -13,16 +13,16 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Safphere/opencowork/releases"><img src="https://img.shields.io/github/v/release/Safphere/opencowork?style=flat-square&color=orange" alt="Release"></a>
-  <a href="https://github.com/Safphere/opencowork/actions"><img src="https://img.shields.io/github/actions/workflow/status/Safphere/opencowork/release.yml?style=flat-square" alt="Build"></a>
-  <a href="./LICENSE"><img src="https://img.shields.io/github/license/Safphere/opencowork?style=flat-square" alt="License"></a>
+  <a href="https://github.com/Safphere/workbuddy/releases"><img src="https://img.shields.io/github/v/release/Safphere/workbuddy?style=flat-square&color=orange" alt="Release"></a>
+  <a href="https://github.com/Safphere/workbuddy/actions"><img src="https://img.shields.io/github/actions/workflow/status/Safphere/workbuddy/release.yml?style=flat-square" alt="Build"></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/github/license/Safphere/workbuddy?style=flat-square" alt="License"></a>
 </p>
 
 ---
 
 ## ⚠️ Risk Notice
 
-OpenCowork allows AI to operate on local file systems and terminals. Please note:
+WorkBuddy allows AI to operate on local file systems and terminals. Please note:
 
 - AI may accidentally delete files or execute incorrect commands
 - Prompt injection risks may exist
@@ -37,10 +37,10 @@ OpenCowork allows AI to operate on local file systems and terminals. Please note
 ## Introduction
 
 <p align="center">
-  <img src="https://i.meee.com.tw/uA5H9yG.png" width="400" alt="OpenCowork Demo">
+  <img src="https://i.meee.com.tw/uA5H9yG.png" width="400" alt="WorkBuddy Demo">
 </p>
 
-**OpenCowork** is the open-source edition of Cowork, turning your PC into an AI-powered work assistant.
+**WorkBuddy** is the open-source edition of Cowork, turning your PC into an AI-powered work assistant.
 
 Supports any Agent-capable model (MiniMax, Claude, GPT, etc.) with no vendor lock-in.
 

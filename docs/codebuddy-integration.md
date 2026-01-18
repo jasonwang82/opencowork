@@ -2,14 +2,14 @@
 
 ## Overview
 
-OpenCowork now supports integration with CodeBuddy CLI tool, which provides a command-line interface for AI-powered coding assistance similar to Claude Code.
+WorkBuddy now supports integration with CodeBuddy CLI tool, which provides a command-line interface for AI-powered coding assistance similar to Claude Code.
 
 ## Features
 
 - **CLI-based execution**: Uses the `codebuddy` command instead of direct API calls
 - **Claude Code compatible**: Parameters are mostly compatible with Claude Code CLI
 - **Flexible configuration**: API keys and model settings passed automatically
-- **Seamless integration**: Works with existing OpenCowork features
+- **Seamless integration**: Works with existing WorkBuddy features
 
 ## Installation
 
@@ -34,7 +34,7 @@ codebuddy --help
 
 ## Configuration
 
-1. Open OpenCowork Settings (⚙️ icon)
+1. Open WorkBuddy Settings (⚙️ icon)
 2. Go to the "通用" (General) tab
 3. Select "CLI 模式 (CodeBuddy)" from the Integration Mode dropdown
 4. (Optional) Configure API Key and Model - these will be passed to codebuddy
@@ -44,7 +44,7 @@ codebuddy --help
 When CodeBuddy mode is enabled:
 
 1. User messages are sent to the `codebuddy` command
-2. OpenCowork executes: `codebuddy --directory <work_dir> --api-key <key> --model <model> --message "<user_message>"`
+2. WorkBuddy executes: `codebuddy --directory <work_dir> --api-key <key> --model <model> --message "<user_message>"`
 3. Output is streamed back to the UI in real-time
 4. Command execution happens in the authorized working directory
 

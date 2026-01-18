@@ -1,19 +1,19 @@
 {
-  "name": "opencowork",
+  "name": "workbuddy",
   "private": true,
-  "version": "1.0.0",
-  "description": "open cowork - 你的数字同事",
+  "version": "0.0.1",
+  "description": "WorkBuddy - 你的数字同事",
   "author": {
     "name": "Safphere",
     "email": "a976466014@gmail.com"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Safphere/opencowork.git"
+    "url": "git+https://github.com/Safphere/workbuddy.git"
   },
-  "homepage": "https://github.com/Safphere/opencowork#readme",
+  "homepage": "https://github.com/Safphere/workbuddy#readme",
   "bugs": {
-    "url": "https://github.com/Safphere/opencowork/issues"
+    "url": "https://github.com/Safphere/workbuddy/issues"
   },
   "license": "Apache-2.0",
   "type": "module",
@@ -28,7 +28,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.71.2",
     "@modelcontextprotocol/sdk": "^1.25.2",
-    "@tencent-ai/agent-sdk": "^0.1.27",
+    "@tencent-ai/agent-sdk": "^0.2.0",
     "@types/react-syntax-highlighter": "^15.5.13",
     "clsx": "^2.1.1",
     "dotenv": "^17.2.3",
@@ -43,7 +43,8 @@
     "remark-gfm": "^4.0.1",
     "tailwind-merge": "^3.4.0",
     "uuid": "^13.0.0",
-    "zod": "^4.3.5"
+    "zod": "^4.3.5",
+    "adm-zip": "^0.5.16"
   },
   "devDependencies": {
     "@types/dotenv": "^6.1.1",
@@ -51,6 +52,7 @@
     "@types/react": "^18.2.64",
     "@types/react-dom": "^18.2.21",
     "@types/uuid": "^10.0.0",
+    "@types/adm-zip": "^0.5.5",
     "@typescript-eslint/eslint-plugin": "^7.1.1",
     "@typescript-eslint/parser": "^7.1.1",
     "@vitejs/plugin-react": "^4.2.1",

@@ -11,14 +11,14 @@ export const I18nContext = createContext<I18nContextType | null>(null);
 
 export function I18nProvider({ children }: { children: ReactNode }) {
     const [language, setLanguage] = useState<Language>(() => {
-        const saved = localStorage.getItem('opencowork-language');
+        const saved = localStorage.getItem('workbuddy-language');
         if (saved === 'en' || saved === 'zh') return saved;
         // Detect browser language
         return navigator.language.startsWith('zh') ? 'zh' : 'en';
     });
 
     useEffect(() => {
-        localStorage.setItem('opencowork-language', language);
+        localStorage.setItem('workbuddy-language', language);
     }, [language]);
 
     const t = (key: TranslationKey): string => {

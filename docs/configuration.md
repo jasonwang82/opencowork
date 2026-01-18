@@ -1,10 +1,10 @@
 # Configuration Guide
 
-OpenCowork provides flexible configuration options, allowing you to customize API connections, model selection, and other advanced settings.
+WorkBuddy provides flexible configuration options, allowing you to customize API connections, model selection, and other advanced settings.
 
 ## Default Configuration
 
-OpenCowork is ready to use out of the box with the following defaults:
+WorkBuddy is ready to use out of the box with the following defaults:
 
 -   **Integration Mode**: `API Mode`
 -   **API URL**: `https://api.minimaxi.com/anthropic`
@@ -14,7 +14,7 @@ This configuration is optimized for a smooth Cowork experience.
 
 ## Integration Modes
 
-OpenCowork supports two integration modes:
+WorkBuddy supports two integration modes:
 
 ### 1. API Mode (Default)
 

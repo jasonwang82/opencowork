@@ -8,6 +8,16 @@ export interface ToolPermission {
 
 export type IntegrationMode = 'api' | 'cli-codebuddy' | 'sdk-codebuddy';
 
+// User info from CodeBuddy authentication
+export interface UserInfo {
+    userId: string;
+    userName: string;
+    userNickname: string;
+    token: string;
+    enterpriseId?: string;
+    enterprise?: string;
+}
+
 export interface AppConfig {
     apiKey: string;
     apiUrl: string;
@@ -20,6 +30,8 @@ export interface AppConfig {
     codeBuddyApiKey: string;
     codeBuddyInternetEnv: string;
     commandBlacklist: string[];  // Commands that are not allowed to execute
+    userInfo: UserInfo | null;   // Authenticated user info
+    setupComplete: boolean;      // Whether first-time setup has been completed
 }
 
 // Default dangerous commands that should be blocked
@@ -45,10 +57,12 @@ const defaults: AppConfig = {
     networkAccess: true, // "Open and use" implies network should be on
     shortcut: 'Alt+Space',
     allowedPermissions: [],
-    integrationMode: 'cli-codebuddy',
+    integrationMode: 'sdk-codebuddy',  // Default to SDK mode
     codeBuddyApiKey: '',
     codeBuddyInternetEnv: 'ioa',
-    commandBlacklist: DEFAULT_COMMAND_BLACKLIST
+    commandBlacklist: DEFAULT_COMMAND_BLACKLIST,
+    userInfo: null,
+    setupComplete: false
 };
 
 class ConfigStore {
@@ -56,7 +70,7 @@ class ConfigStore {
 
     constructor() {
         this.store = new Store<AppConfig>({
-            name: 'opencowork-config',
+            name: 'workbuddy-config',
             defaults
         });
     }
@@ -177,7 +191,7 @@ class ConfigStore {
 
     // Integration Mode
     getIntegrationMode(): IntegrationMode {
-        return this.store.get('integrationMode') || 'api';
+        return this.store.get('integrationMode') || 'sdk-codebuddy';
     }
 
     setIntegrationMode(mode: IntegrationMode): void {
@@ -233,6 +247,33 @@ class ConfigStore {
 
     resetBlacklistToDefault(): void {
         this.store.set('commandBlacklist', DEFAULT_COMMAND_BLACKLIST);
+    }
+
+    // User Authentication
+    getUserInfo(): UserInfo | null {
+        return this.store.get('userInfo') || null;
+    }
+
+    setUserInfo(userInfo: UserInfo | null): void {
+        this.store.set('userInfo', userInfo);
+    }
+
+    isLoggedIn(): boolean {
+        const userInfo = this.getUserInfo();
+        return userInfo !== null && !!userInfo.token;
+    }
+
+    logout(): void {
+        this.store.set('userInfo', null);
+    }
+
+    // Setup Complete
+    isSetupComplete(): boolean {
+        return this.store.get('setupComplete') || false;
+    }
+
+    setSetupComplete(complete: boolean): void {
+        this.store.set('setupComplete', complete);
     }
 }
 

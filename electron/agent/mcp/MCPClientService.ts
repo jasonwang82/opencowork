@@ -17,7 +17,7 @@ export class MCPClientService {
     private configPath: string;
 
     constructor() {
-        this.configPath = path.join(os.homedir(), '.opencowork', 'mcp.json');
+        this.configPath = path.join(os.homedir(), '.codebuddy', 'mcp.json');
     }
 
     async loadClients() {
@@ -70,7 +70,7 @@ export class MCPClientService {
             });
 
             const client = new Client({
-                name: "opencowork-client",
+                name: "workbuddy-client",
                 version: "1.0.0",
             }, {
                 capabilities: {

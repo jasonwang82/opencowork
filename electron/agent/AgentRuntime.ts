@@ -92,6 +92,9 @@ export class AgentRuntime {
         this.isProcessing = true;
         this.abortController = new AbortController();
 
+        // Broadcast stream start to clear previous progress
+        this.broadcast('agent:stream-start', {});
+
         try {
             await this.skillManager.loadSkills();
             await this.mcpService.loadClients();
@@ -179,13 +182,13 @@ export class AgentRuntime {
                 ? `\n\nWORKING DIRECTORY:\n- Primary: ${authorizedFolders[0]}\n- All authorized: ${authorizedFolders.join(', ')}\n\nYou should primarily work within these directories. Always use absolute paths.`
                 : '\n\nNote: No working directory has been selected yet. Ask the user to select a folder first.';
 
-            const skillsDir = os.homedir() + '/.opencowork/skills';
-            const systemPrompt = `You are OpenCowork, an advanced AI agent capable of managing files, executing complex tasks, and assisting the user.
+            const skillsDir = os.homedir() + '/.codebuddy/skills';
+            const systemPrompt = `You are WorkBuddy, an advanced AI agent capable of managing files, executing complex tasks, and assisting the user.
             
             TOOL USAGE:
             - Use 'read_file', 'write_file', and 'list_dir' for file operations.
             - Use 'run_command' to execute shell commands, Python scripts, npm commands, etc.
-            - You can use skills defined in ~/.opencowork/skills/ - when a skill is loaded, follow its instructions immediately.
+            - You can use skills defined in ~/.codebuddy/skills/ - when a skill is loaded, follow its instructions immediately.
             - Skills with a 'core/' directory (like slack-gif-creator) have Python modules you can import directly.
               Example: Set PYTHONPATH to the skill directory and run your script.
             - You can access external tools provided by MCP servers (prefixed with server name).
@@ -420,13 +423,16 @@ ${skillInfo.instructions}
         }
     }
 
-    // Broadcast to all windows
+    // Broadcast to all windows (non-blocking)
     private broadcast(channel: string, data: unknown) {
-        for (const win of this.windows) {
-            if (!win.isDestroyed()) {
-                win.webContents.send(channel, data);
+        // Use setImmediate to avoid blocking the main process
+        setImmediate(() => {
+            for (const win of this.windows) {
+                if (!win.isDestroyed()) {
+                    win.webContents.send(channel, data);
+                }
             }
-        }
+        });
     }
 
     private notifyUpdate() {
